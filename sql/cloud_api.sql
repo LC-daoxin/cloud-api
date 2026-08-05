@@ -185,7 +185,7 @@ VALUES
     (14, 3, 30000, 0, 'UAV Virtual Nest', '虚拟机巣'),
     (15, 3, 30001, 0, 'EVO Nest', '多旋翼机巣'),
     (16, 3, 30002, 0, 'UAV Dragonfish Nest', '龙鱼机巣'),
-    (17, 3, 30004, 0, 'UAV Nest2', '机巣二代'),
+    (17, 3, 30004, 0, 'UAV Nest2', '机巣二代');
 
 /*!40000 ALTER TABLE `manage_device_dictionary` ENABLE KEYS */;
 UNLOCK TABLES;

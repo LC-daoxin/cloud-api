@@ -1,0 +1,131 @@
+server:
+  port: 9000
+
+spring:
+  main:
+    allow-bean-definition-overriding: true
+  application:
+    name: cloud-service
+  datasource:
+    druid:
+      type: com.alibaba.druid.pool.DruidDataSource
+      driver-class-name: com.mysql.cj.jdbc.Driver
+      # 容器内用 compose 服务名；数据库名与 SQL 脚本一致
+      url: jdbc:mysql://mysql:3306/cloud_sample?useSSL=false&allowPublicKeyRetrieval=true&serverTimezone=Asia/Shanghai
+      username: uav_cloud
+      password: devpass
+      initial-size: 2
+      min-idle: 2
+      max-active: 8
+      max-wait: 60000
+  redis:
+    host: redis
+    port: 6379
+    database: 0
+    password:
+    lettuce:
+      pool:
+        max-active: 4
+        max-idle: 4
+        min-idle: 0
+  servlet:
+    multipart:
+      max-file-size: 2GB
+      max-request-size: 2GB
+
+jwt:
+  issuer: UAV
+  subject: CloudApi
+  secret: dev-local-secret-replace-in-production-32chars
+  age: 86400
+
+mqtt:
+  BASIC:
+    protocol: MQTT
+    # 容器内用 Docker 服务名连接 MQTT Broker
+    host: mqtt
+    port: 1883
+    username: uav_cloud_service
+    password: any
+    client-id: cloud_service_local
+    path:
+  DRC:
+    protocol: WSS
+    host: mqtt
+    port: 9001
+    path: /mqtt
+    username: cc_server
+    password: any
+
+cloud-sdk:
+  mqtt:
+    inbound-topic: sys/product/+/status,thing/product/+/requests,thing/product/+/state
+
+url:
+  manage:
+    prefix: manage
+    version: /api/v1
+  map:
+    prefix: map
+    version: /api/v1
+  media:
+    prefix: media
+    version: /api/v1
+  wayline:
+    prefix: wayline
+    version: /api/v1
+  storage:
+    prefix: storage
+    version: /api/v1
+  control:
+    prefix: control
+    version: /api/v1
+
+oss:
+  enable: true
+  provider: minio
+  # 容器内访问 MinIO，端口是容器内的 9000
+  endpoint: http://minio:9000
+  access-key: minioadmin
+  secret-key: minioadmin
+  bucket: uav-store
+  expire: 3600
+  region:
+  object-dir-prefix: wayline
+
+logging:
+  level:
+    # 修正原配置的 com.dji 错误包名
+    com.uav: debug
+  file:
+    name: /app/logs/cloud-service.log
+
+ntp:
+  server:
+    host: time.apple.com
+
+cloud-api:
+  app:
+    id: dev-app-id
+    key: dev-app-key
+    license: dev-license
+
+livestream:
+  url:
+    rtmp:
+      url: rtmp://localhost:1936/live/
+      payUrl: http://localhost:8081/index/api/webrtc?app=live&stream=%s&type=play
+    rtsp:
+      username: admin
+      password: admin
+      port: 8554
+    gb28181:
+      serverIP: 0.0.0.0
+      serverPort: 8080
+      serverID: "34020000002000000001"
+      agentID: "34020000002000000001"
+      agentPassword: admin
+      localPort: 8081
+      channel: "34020000001320000001"
+    whip:
+      url: ""

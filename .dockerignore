@@ -1,0 +1,11 @@
+target/
+**/target/
+.git/
+*.log
+logs/
+.idea/
+*.iml
+.DS_Store
+*.zip
+docker/mysql_dev_data/
+docker/minio_dev_data/

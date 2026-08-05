@@ -1,0 +1,18 @@
+logLevel: info
+logDestinations: [stdout]
+
+# Docker Compose only exposes the RTSP TCP port. Force both publisher and
+# readers to interleave RTP/RTCP over that connection so media packets are not
+# lost on unpublished UDP ports.
+rtsp: true
+rtspAddress: :8554
+rtspTransports: [tcp]
+
+webrtc: true
+webrtcAddress: :8889
+
+pathDefaults:
+  source: publisher
+
+paths:
+  all_others:

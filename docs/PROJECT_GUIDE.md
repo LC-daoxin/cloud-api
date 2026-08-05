@@ -50,17 +50,29 @@ flowchart LR
 │       ├── storage/                  # STS/对象存储凭证
 │       └── assignment/               # 启动恢复和全局定时任务
 ├── cloud-api/                        # Cloud API 能力抽象和协议入口
-├── uav-framework/                  # 7 个可独立安装的基础框架模块
-│   ├── uav-framework-context/      # 公共模型、异常、JWT、Web 拦截器
-│   ├── uav-framework-mqtt/         # MQTT 模型、路由、订阅、同步请求应答
-│   ├── uav-framework-websocket/    # WebSocket 鉴权、会话和推送
-│   ├── uav-framework-redis/        # Redis 工具与 key 约定
-│   ├── uav-framework-db/           # MyBatis Plus、Druid、审计字段填充
-│   ├── uav-framework-storage/      # MinIO、S3、阿里云 OSS 适配
-│   └── uav-framework-web/          # Web 自动装配
+├── uav-framework/                    # 7 个可独立安装的基础框架模块
+│   ├── uav-framework-context/        # 公共模型、异常、JWT、Web 拦截器
+│   ├── uav-framework-mqtt/           # MQTT 模型、路由、订阅、同步请求应答
+│   ├── uav-framework-websocket/      # WebSocket 鉴权、会话和推送
+│   ├── uav-framework-redis/          # Redis 工具与 key 约定
+│   ├── uav-framework-db/             # MyBatis Plus、Druid、审计字段填充
+│   ├── uav-framework-storage/        # MinIO、S3、阿里云 OSS 适配
+│   └── uav-framework-web/            # Web 自动装配
 ├── sql/cloud_api.sql                 # 建库、建表和演示初始化数据
 ├── pom.xml                           # cloud-service + cloud-api 聚合工程
-└── uav-framework/pom.xml           # 基础框架的独立聚合工程
+├── uav-framework/pom.xml             # 基础框架的独立聚合工程
+├── Dockerfile                        # 多阶段构建（JDK17 编译 → JRE 运行）
+├── docker-compose.yml                # 本地一键部署：app + MySQL + Redis + MQTT + MinIO
+├── .dockerignore
+├── docker/
+│   ├── config/application.yml        # 外部运行配置（覆盖内置 yml，不提交凭证）
+│   └── mosquitto/mosquitto.conf      # Mosquitto MQTT Broker 配置
+└── docs/
+    ├── PROJECT_GUIDE.md              # 本文件
+    ├── LINUX_DEPLOYMENT.md           # Linux 裸机部署手册
+    ├── PILOT_APP_SETUP.md            # Pilot App 接入配置说明
+    ├── API_CALL_GUIDE.md             # 完整 REST API 调用指南（55+ 个接口）
+    └── python-demo/                  # 13 个独立 Python demo 脚本
 ```
 
 当前约有 885 个 Java 文件，其中大量文件是 MQTT 协议 DTO 和枚举。真正的业务阅读重点是 `cloud-service` 的约 296 个文件，而不是逐个阅读全部协议模型。
@@ -307,78 +319,242 @@ Redis key 应优先从 `uav-framework-redis/.../RedisConst.java` 查找，避免
 
 ## 10. 本地启动
 
-### 10.1 前置条件
+本仓库已提供完整的 Docker 化部署方案（`Dockerfile` + `docker-compose.yml`），**推荐使用 Docker 方式启动**，无需在本机安装 JDK、MySQL、Redis 等依赖。
 
-- JDK 17（项目明确以 Java 17 编译；不要直接使用过新的 JDK）
+---
+
+### 10.1 方式一：Docker（推荐）
+
+#### 前置条件
+
+- Docker Desktop（Mac/Windows）或 Docker Engine + Compose v2（Linux）
+- 如果需要为 ARM64 设备（Jetson Nano 等）构建镜像，需要 Apple Silicon Mac 或配置 `buildx`
+
+#### 仓库新增的 Docker 文件
+
+```text
+.
+├── Dockerfile                   # 多阶段构建：JDK17+Maven 编译 → JRE 运行时
+├── docker-compose.yml           # 一键编排 app + MySQL + Redis + MQTT + MinIO
+├── .dockerignore
+└── docker/
+    ├── config/
+    │   └── application.yml      # 生产外部配置（覆盖内置 yml）
+    └── mosquitto/
+        └── mosquitto.conf       # Mosquitto 配置
+```
+
+#### 第一步：修改外部配置
+
+编辑 `docker/config/application.yml`，至少确认以下字段正确：
+
+```yaml
+# 数据库（容器内用 compose 服务名）
+spring.datasource.druid.url: jdbc:mysql://mysql:3306/cloud_sample?...
+spring.datasource.druid.username: uav_cloud
+spring.datasource.druid.password: devpass
+
+# MQTT（host 必须填宿主机 LAN IP，设备需要从外部连接）
+mqtt.BASIC.host: 172.20.10.8   # ← 改为你的 Mac/服务器 LAN IP
+mqtt.BASIC.port: 1883
+
+# MinIO（容器内用服务名，宿主机端口 9100）
+oss.endpoint: http://minio:9000
+oss.access-key: minioadmin
+oss.secret-key: minioadmin
+oss.bucket: uav-store
+```
+
+> **为什么 MQTT host 要填 LAN IP？**
+> 登录接口会把 `mqtt.BASIC.host` 返回给 App 端（`mqtt_addr` 字段）。
+> App 在 Docker 外部，无法解析容器内部名 `mqtt`，因此必须填外部可达的 IP。
+
+#### 第二步：构建并启动
+
+```bash
+cd /path/to/Cloud-API
+
+# 首次构建（需下载 Maven 依赖，约 5~10 分钟）
+docker compose up -d --build
+
+# 后续重启（使用缓存，秒级）
+docker compose up -d
+```
+
+构建分三个阶段（均在 Dockerfile 中自动完成）：
+
+| 阶段 | 操作 | 耗时 |
+|---|---|---|
+| framework-builder | 修复 `${revision}`，安装 uav-framework | 首次约 8 分钟 |
+| app-builder | 编译 cloud-api + cloud-service，打 fat JAR | 约 2 分钟 |
+| 运行时镜像 | 只保留 JRE + JAR | 秒级 |
+
+#### 第三步：初始化 MinIO Bucket
+
+**首次启动必须执行**，否则文件上传会失败：
+
+```bash
+docker exec uav-minio sh -c \
+  "mc alias set local http://localhost:9000 minioadmin minioadmin && mc mb --ignore-existing local/uav-store"
+```
+
+#### 第四步：验证启动状态
+
+```bash
+# 查看所有容器是否健康
+docker compose ps
+
+# 实时查看应用日志
+docker compose logs -f app
+```
+
+正常启动后容器状态：
+
+| 容器 | 宿主机端口 | 用途 |
+|---|---|---|
+| `uav-cloud-app` | `9000` | HTTP API + WebSocket |
+| `uav-mysql` | `3307` | 数据库（避免与本机 MySQL 冲突） |
+| `uav-redis` | `6379` | 缓存与在线态 |
+| `uav-mqtt` | `1883`（TCP）、`9001`（WS） | MQTT Broker |
+| `uav-minio` | `9100`（API）、`9101`（控制台） | 对象存储 |
+
+#### 第五步：最小验证
+
+```bash
+# 1. 登录（演示账号）
+curl -sS -X POST http://localhost:9000/manage/api/v1/login \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"adminPC","password":"adminPC","flag":1}'
+# 期望：code=0，返回 access_token
+
+# 2. 查工作空间（使用上一步返回的 token）
+curl -sS http://localhost:9000/manage/api/v1/workspaces/current \
+  -H 'x-auth-token: <token>'
+
+# 3. WebSocket 连接测试（浏览器或 wscat）
+# ws://localhost:9000/api/v1/ws?x-auth-token=<token>
+```
+
+#### 常见问题
+
+| 现象 | 原因 | 解决 |
+|---|---|---|
+| `uav-mysql` 启动失败（SQL 语法错误） | `sql/cloud_api.sql` 中最后一行 INSERT 有尾部逗号 | 已在本仓库修复 |
+| 端口 3306 冲突 | 本机已有 MySQL | compose 已将 MySQL 宿主机端口改为 `3307` |
+| App 连接 MQTT 失败 | `docker/config/application.yml` 中 `mqtt.BASIC.host` 仍为 `mqtt` | 改为宿主机 LAN IP |
+| 设备 App 连接 MQTT 失败 | 同上，App 外部无法解析 `mqtt` | 改为宿主机 LAN IP |
+| MinIO 文件上传失败 | bucket 未创建 | 执行第三步的 `mc mb` 命令 |
+| `no main manifest attribute` | JAR 未执行 repackage | Dockerfile 已自动执行 `spring-boot:repackage` |
+
+---
+
+### 10.2 方式二：裸机启动（需手动安装依赖）
+
+适合需要 IDE 断点调试的场景。
+
+#### 前置条件
+
+- **JDK 17**（必须是 17，JDK 21+ 会导致 Lombok 编译失败）
 - Maven 3.8+
-- MySQL 8
-- Redis
-- MQTT Broker（配置结构和账号字段偏向 EMQX）
-- MinIO、Amazon S3 或阿里云 OSS 三选一
-
-### 10.2 初始化数据库
-
-执行：
+- MySQL 8、Redis、MQTT Broker（如 Mosquitto 或 EMQX）、MinIO
 
 ```bash
-mysql -u <user> -p < sql/cloud_api.sql
+# 验证 JDK 版本
+java -version   # 必须输出 17.x
 ```
 
-然后修改 `cloud-service/src/main/resources/application.yml` 中的 datasource。
+#### POM `${revision}` 问题（必须先处理）
 
-注意：SQL 脚本创建的是 `cloud_sample`，当前 YAML 示例连接的却是 `cloud_service`。两者必须改成一致。
-
-### 10.3 配置外部服务
-
-至少需要填写：
-
-- `spring.datasource.druid.*`
-- `spring.redis.*`
-- `mqtt.BASIC.*`
-- `oss.*`
-- `cloud-api.app.*`
-
-如果使用 DRC，再配置 `mqtt.DRC.*`；如果使用直播，再配置相应的 RTMP/RTSP/GB28181/WHIP/Agora 参数。
-
-建议通过环境变量或单独的 profile 文件注入密钥，不要提交真实凭证。
-
-### 10.4 构建与运行
+两个 Maven Reactor 的子模块父版本用了 `${revision}` 占位符，安装到本地仓库后消费方无法解析。需要先固定：
 
 ```bash
-# 1. 安装本仓库内的 framework artifacts
-mvn -f uav-framework/pom.xml clean install
+# 固定 framework 子模块父版本
+find uav-framework -name pom.xml | xargs sed -i '' \
+  's|<version>${revision}</version>|<version>1.0.0</version>|g'
 
-# 2. 构建 SDK 与应用
-mvn clean package
-
-# 3. 启动
-java -jar cloud-service/target/cloud-service-1.10.0.jar
+# 固定 cloud 子模块父版本
+sed -i '' \
+  's|<version>${revision}</version>|<version>1.10.0</version>|g' \
+  cloud-api/pom.xml cloud-service/pom.xml pom.xml
 ```
 
-也可以在完成 framework 安装和根工程构建后，进入应用模块运行：
+#### 构建与启动
 
 ```bash
-mvn -f cloud-service/pom.xml spring-boot:run
+# 1. 安装 framework（首次必须先做）
+mvn -f uav-framework/pom.xml clean install -DskipTests
+
+# 2. 构建主工程
+mvn clean install -DskipTests
+
+# 3. 生成可执行 fat JAR
+mvn -f cloud-service/pom.xml clean package spring-boot:repackage -DskipTests
+
+# 4. 启动（外挂配置覆盖内置 yml）
+java -Xms256m -Xmx768m \
+  -jar cloud-service/target/cloud-service-1.10.0.jar \
+  --spring.config.additional-location=file:docker/config/application.yml
 ```
 
-### 10.5 最小验证
+调试模式（IDE 直接运行）：
 
-1. 日志中没有 MySQL、Redis、MQTT 或 OSS 连接失败。
-2. `POST /manage/api/v1/login` 能返回 access token。
-3. 使用 `x-auth-token` 请求 `/manage/api/v1/workspaces/current`。
-4. 使用 token 连接 `/api/v1/ws`。
-5. 设备接入后，Redis 出现在线 key，前端收到拓扑与 OSD 推送。
+```bash
+# 激活 dev profile，使用 docker/config/application.yml
+mvn -f cloud-service/pom.xml spring-boot:run \
+  -Dspring-boot.run.arguments="--spring.config.additional-location=file:docker/config/application.yml"
+```
 
-SQL 中包含演示账号，但它们是明文弱口令，只适合本地演示，不应在共享或生产环境使用。
+---
+
+### 10.3 Python Demo 快速验证
+
+仓库内置了 `docs/python-demo/` 目录，包含 13 个独立 Python 脚本，无需了解项目内部即可验证 API：
+
+```bash
+cd docs/python-demo
+
+# 首次：一键建立虚拟环境并安装依赖
+chmod +x run.sh
+
+# 验证登录
+./run.sh demo_01_login.py
+
+# 查询在线设备（获取 SN 填入 config.py）
+./run.sh demo_02_devices.py
+
+# 实时监听设备遥测（WebSocket OSD）
+./run.sh demo_07_websocket_osd.py
+```
+
+详见 [docs/python-demo/README.md](python-demo/README.md)。
+
+---
+
+### 10.4 演示账号说明
+
+SQL 初始化脚本中包含两套账号（明文存储，仅供本地调试）：
+
+| 账号 | 密码 | 类型 | flag | 用途 |
+|---|---|---|---|---|
+| `adminPC` | `adminPC` | Web 端 | `1` | curl 调试、Python demo、Web 前端 |
+| `pilot` | `pilot123` | Pilot/App 端 | `2` | Autel Pilot App 接入 |
+
+> **Pilot App 配置要点：**
+> - 登录地址：`http://<LAN IP>:9000/manage/api/v1/login`
+> - 账号：`pilot` / `pilot123`（不能用 `adminPC`，类型不匹配）
+> - MQTT 地址：`mqtt://<LAN IP>:1883`
+> - WebSocket：`ws://<LAN IP>:9000/api/v1/ws`（token 由 App 登录后自动追加）
+>
+> 详见 [docs/PILOT_APP_SETUP.md](PILOT_APP_SETUP.md)。
 
 ## 11. 启动前必看的问题与风险
 
 ### 配置与版本不一致
 
-1. SQL 数据库名是 `cloud_sample`，YAML 是 `cloud_service`。
-2. 应用默认端口和示例 MinIO endpoint 都是本机 `9000`；若 MinIO 与应用在同一台主机，会端口冲突。
+1. SQL 数据库名是 `cloud_sample`，YAML 是 `cloud_service`。**→ `docker/config/application.yml` 已统一为 `cloud_sample`。**
+2. 应用默认端口和示例 MinIO endpoint 都是本机 `9000`；若 MinIO 与应用在同一台主机，会端口冲突。**→ `docker-compose.yml` 中 MinIO 宿主机端口已改为 `9100`，冲突已规避。**
 3. 根 README 写的发布版是 1.0.0，根 POM 当前版本是 1.10.0，`cloud-api` 版本是 1.0.3。
-4. 日志级别仍配置为 `com.dji`，而本项目包名是 `com.uav`，该 debug 配置基本不会覆盖业务代码。
+4. 日志级别仍配置为 `com.dji`，而本项目包名是 `com.uav`，该 debug 配置基本不会覆盖业务代码。**→ `docker/config/application.yml` 已改为 `com.uav: debug`。**
 
 ### 安全风险
 

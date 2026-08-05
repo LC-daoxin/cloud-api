@@ -68,6 +68,7 @@ public enum DeviceTypeEnum {
     EVO_MAX(11000),
     EVO_MAX_4N_CAMERA(10053),
     EVO_MAX_4T_CAMERA(10052),
+    EVO_MAX_4T_PAYLOAD(10806),
     UAV_DOCK_CAMERA(10165),
     /**
      * 平板

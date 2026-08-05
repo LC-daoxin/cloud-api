@@ -72,8 +72,14 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
 
         url = setExt(liveParam.getUrlType(), url, liveParam.getVideoId());
 
+        // Autel devices can publish directly to a complete MediaMTX RTSP URL.
+        // Keep the legacy parameter string as a fallback for existing clients.
+        String pushUrl = liveParam.getUrl() == null || liveParam.getUrl().trim().isEmpty()
+                ? url.toString()
+                : liveParam.getUrl().trim();
+
         LiveStartPushRequest3 request3 = new LiveStartPushRequest3();
-        request3.setUrl(url.toString());
+        request3.setUrl(pushUrl);
         request3.setUrl_type(liveParam.getUrlType().getType());
         request3.setVideo_id(liveParam.getVideoId().getDroneSn() + "-" + liveParam.getVideoId().getPayloadIndex().toString());
 
@@ -113,7 +119,10 @@ public class LiveStreamServiceImpl implements ILiveStreamService {
                         .toString());
                 break;
             case RTSP:
-                //live.setUrl(response.getData().getOutput());
+                String deviceUrl = response.getData().getOutput();
+                live.setUrl(deviceUrl == null || deviceUrl.trim().isEmpty()
+                        ? pushUrl
+                        : deviceUrl);
                 break;
             case WHIP:
                 live.setUrl(url.toString().replace("whip", "whep"));

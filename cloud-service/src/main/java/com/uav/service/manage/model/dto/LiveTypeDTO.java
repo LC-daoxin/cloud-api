@@ -21,4 +21,10 @@ public class LiveTypeDTO {
 
     private LensChangeVideoTypeEnum videoType;
 
+    /**
+     * Optional device publish URL. When present, it overrides the legacy
+     * username/password/port RTSP parameters from application.yml.
+     */
+    private String url;
+
 }
