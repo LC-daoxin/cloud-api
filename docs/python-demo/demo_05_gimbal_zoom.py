@@ -1,5 +1,5 @@
 """
-demo_03_gimbal_zoom.py —— 云台变焦（camera_focal_length_set）
+demo_05_gimbal_zoom.py -- 云台变焦（camera_focal_length_set）
 
 变焦范围：2.0 ~ 200.0（数字变焦倍率）
 运行前确保：
@@ -8,7 +8,7 @@ demo_03_gimbal_zoom.py —— 云台变焦（camera_focal_length_set）
   3. 云台处于 IDLE 状态
 
 运行：
-    python3 demo_03_gimbal_zoom.py
+    python3 demo_05_gimbal_zoom.py
 """
 import requests
 from config import BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG, DOCK_SN, PAYLOAD_INDEX
@@ -67,7 +67,7 @@ def zoom(token, zoom_factor: float):
     return result
 
 if __name__ == "__main__":
-    print(f"[*] 目标机巢: {DOCK_SN}")
+    print(f"[*] 目标设备: {DOCK_SN}")
     print(f"[*] 负载索引: {PAYLOAD_INDEX}")
     print(f"[*] 目标焦距: {ZOOM_FACTOR}x")
 

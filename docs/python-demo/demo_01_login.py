@@ -4,7 +4,7 @@ demo_01_login.py -- 登录并获取 access_token
 运行：
     python3 demo_01_login.py
 
-分别用 Web 端（adminPC）和 Pilot/App 端（pilot）账号登录，
+分别用 Web 端（admin）和 Pilot/App 端（pilot）账号登录，
 打印各自的 token 和接入配置信息。
 """
 import requests
@@ -59,14 +59,14 @@ def login(username, password, flag, label):
 
 
 if __name__ == "__main__":
-    # Web 端（adminPC）-- 用于 API 调试和 Python demo
-    web_token = login(WEB_USERNAME, WEB_PASSWORD, WEB_FLAG, "Web 端登录 (adminPC)")
+    # Web 端（admin）-- 用于 API 调试和 Python demo
+    web_token = login(WEB_USERNAME, WEB_PASSWORD, WEB_FLAG, "Web 端登录 (admin)")
 
     # Pilot/App 端（pilot）-- 用于 Autel Pilot App 接入
     pilot_token = login(PILOT_USERNAME, PILOT_PASSWORD, PILOT_FLAG, "Pilot/App 端登录 (pilot)")
 
     print(f"\n{'='*60}")
     if web_token:
-        print(f"[✓] Web 端登录成功，token 可用于 demo_03 ~ demo_13")
+        print(f"[✓] Web 端登录成功，token 可用于 demo_05 ~ demo_14")
     if pilot_token:
         print(f"[✓] Pilot/App 端登录成功，配置信息可填入 Pilot App")

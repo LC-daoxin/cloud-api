@@ -4,15 +4,16 @@
 
 # ── 服务器地址 ─────────────────────────────────────────
 # 将下面的 IP 改为 Mac 的局域网 IP（同一局域网内其他设备需填此地址）
-SERVER_IP = "172.20.10.8"
+SERVER_IP = "192.168.2.27"
 SERVER_PORT = 9000
 
 BASE_URL = f"http://{SERVER_IP}:{SERVER_PORT}"
 
 # ── HTTP 登录账号 ──────────────────────────────────────
 # flag=1: Web 端账号；flag=2: Pilot 遥控器账号
-WEB_USERNAME = "adminPC"
-WEB_PASSWORD = "adminPC"
+# 初始账号见 sql/cloud_api.sql（manage_user 表），默认为 admin / Yoox@123456
+WEB_USERNAME = "admin"
+WEB_PASSWORD = "Yoox@123456"
 WEB_FLAG = 1
 
 PILOT_USERNAME = "pilot"
@@ -24,8 +25,8 @@ MQTT_HOST = SERVER_IP        # 同局域网填 Mac IP
 MQTT_PORT = 1883             # TCP 明文
 MQTT_WS_PORT = 9001          # WebSocket 协议（ws://IP:9001/mqtt）
 # Mosquitto 当前允许匿名，填任意字符串即可；也可使用 SQL 中的账号
-MQTT_USERNAME = "admin"      # 对应 adminPC 用户的 mqtt_username
-MQTT_PASSWORD = "admin"      # 对应 adminPC 用户的 mqtt_password
+MQTT_USERNAME = "admin"      # 对应 admin 用户的 mqtt_username
+MQTT_PASSWORD = "admin"      # 对应 admin 用户的 mqtt_password
 
 # ── WebSocket 地址 ─────────────────────────────────────
 # token 通过登录接口获取，填入后连接

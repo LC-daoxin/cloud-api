@@ -9,6 +9,11 @@ target/
 __pycache__/
 *.pyc
 
+# 环境变量（含节点密码/密钥，不入库；保留 .env.example 作为模板）
+.env
+.env.*
+!.env.example
+
 ### STS ###
 .apt_generated
 .classpath

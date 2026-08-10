@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 快捷运行脚本，自动激活虚拟环境
 # 用法：./run.sh demo_01_login.py
-#       ./run.sh demo_05_camera.py photo
+#       ./run.sh demo_07_camera.py photo
 
 set -e
 

@@ -21,7 +21,9 @@ public enum PayloadCommandsEnum {
 
     CAMERA_FOCAL_LENGTH_SET(PayloadControlMethodEnum.CAMERA_FOCAL_LENGTH_SET, CameraFocalLengthSetImpl.class),
 
-    GIMBAL_RESET(PayloadControlMethodEnum.GIMBAL_RESET, GimbalResetImpl.class);
+    GIMBAL_RESET(PayloadControlMethodEnum.GIMBAL_RESET, GimbalResetImpl.class),
+
+    CAMERA_LOOK_AT(PayloadControlMethodEnum.CAMERA_LOOK_AT, CameraLookAtImpl.class);
 
     PayloadControlMethodEnum cmd;
 

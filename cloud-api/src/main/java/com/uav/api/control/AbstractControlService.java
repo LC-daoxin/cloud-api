@@ -28,6 +28,8 @@ import org.springframework.messaging.MessageHeaders;
 import javax.annotation.Resource;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.util.List;
+import java.util.Map;
 
 
 public abstract class AbstractControlService {
@@ -65,12 +67,34 @@ public abstract class AbstractControlService {
                 ControlMethodEnum.FLIGHT_AUTHORITY_GRAB.getMethod());
     }
 
+    /**
+     * RC 网关把无人机作为子设备管理：面向机身的 services 指令必须携带
+     * device_list 显式寻址无人机 SN，否则遥控器静默丢弃指令、从不回复
+     * services_reply，云端表现为 211001（无消息回复）超时。
+     */
+    public TopicServicesResponse<ServicesReplyData> flightAuthorityGrabRc(GatewayManager gateway) {
+        return servicesPublish.publish(
+                gateway.getGatewaySn(),
+                ControlMethodEnum.FLIGHT_AUTHORITY_GRAB.getMethod(),
+                null,
+                List.of(Map.of("sn", gateway.getDroneSn())));
+    }
+
     @CloudSDKVersion(exclude = GatewayTypeEnum.RC)
     public TopicServicesResponse<ServicesReplyData> payloadAuthorityGrab(GatewayManager gateway, PayloadAuthorityGrabRequest request) {
         return servicesPublish.publish(
                 gateway.getGatewaySn(),
                 ControlMethodEnum.PAYLOAD_AUTHORITY_GRAB.getMethod(),
                 request);
+    }
+
+    // RC 网关需 device_list 寻址无人机，理由同 flightAuthorityGrabRc。
+    public TopicServicesResponse<ServicesReplyData> payloadAuthorityGrabRc(GatewayManager gateway, PayloadAuthorityGrabRequest request) {
+        return servicesPublish.publish(
+                gateway.getGatewaySn(),
+                ControlMethodEnum.PAYLOAD_AUTHORITY_GRAB.getMethod(),
+                request,
+                List.of(Map.of("sn", gateway.getDroneSn())));
     }
 
     @CloudSDKVersion(exclude = GatewayTypeEnum.RC)
@@ -96,12 +120,30 @@ public abstract class AbstractControlService {
                 request);
     }
 
+    // RC 网关需 device_list 寻址无人机，理由同 flightAuthorityGrabRc。
+    public TopicServicesResponse<ServicesReplyData> takeoffToPointRc(GatewayManager gateway, TakeoffToPointRequest request) {
+        return servicesPublish.publish(
+                gateway.getGatewaySn(),
+                ControlMethodEnum.TAKEOFF_TO_POINT.getMethod(),
+                request,
+                List.of(Map.of("sn", gateway.getDroneSn())));
+    }
+
     @CloudSDKVersion(exclude = GatewayTypeEnum.RC)
     public TopicServicesResponse<ServicesReplyData> flyToPoint(GatewayManager gateway, FlyToPointRequest request) {
         return servicesPublish.publish(
                 gateway.getGatewaySn(),
                 ControlMethodEnum.FLY_TO_POINT.getMethod(),
                 request);
+    }
+
+    // RC 网关需 device_list 寻址无人机，理由同 flightAuthorityGrabRc。
+    public TopicServicesResponse<ServicesReplyData> flyToPointRc(GatewayManager gateway, FlyToPointRequest request) {
+        return servicesPublish.publish(
+                gateway.getGatewaySn(),
+                ControlMethodEnum.FLY_TO_POINT.getMethod(),
+                request,
+                List.of(Map.of("sn", gateway.getDroneSn())));
     }
 
     @CloudSDKVersion(since = CloudSDKVersionEnum.V1_0_2, exclude = GatewayTypeEnum.RC, include = GatewayTypeEnum.DOCK)
@@ -117,6 +159,15 @@ public abstract class AbstractControlService {
         return servicesPublish.publish(
                 gateway.getGatewaySn(),
                 ControlMethodEnum.FLY_TO_POINT_STOP.getMethod());
+    }
+
+    // RC 网关需 device_list 寻址无人机，理由同 flightAuthorityGrabRc。
+    public TopicServicesResponse<ServicesReplyData> flyToPointStopRc(GatewayManager gateway) {
+        return servicesPublish.publish(
+                gateway.getGatewaySn(),
+                ControlMethodEnum.FLY_TO_POINT_STOP.getMethod(),
+                null,
+                List.of(Map.of("sn", gateway.getDroneSn())));
     }
 
     @CloudSDKVersion(exclude = GatewayTypeEnum.RC)
@@ -194,6 +245,15 @@ public abstract class AbstractControlService {
                 gateway.getGatewaySn(),
                 ControlMethodEnum.CAMERA_LOOK_AT.getMethod(),
                 request);
+    }
+
+    // RC 网关需 device_list 寻址无人机（负载挂在机身上），理由同 flightAuthorityGrabRc。
+    public TopicServicesResponse<ServicesReplyData> cameraLookAtRc(GatewayManager gateway, CameraLookAtRequest request) {
+        return servicesPublish.publish(
+                gateway.getGatewaySn(),
+                ControlMethodEnum.CAMERA_LOOK_AT.getMethod(),
+                request,
+                List.of(Map.of("sn", gateway.getDroneSn())));
     }
 
     @CloudSDKVersion(since = CloudSDKVersionEnum.V1_0_0, exclude = GatewayTypeEnum.RC)

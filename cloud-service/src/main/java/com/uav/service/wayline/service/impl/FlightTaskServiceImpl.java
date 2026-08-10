@@ -3,6 +3,8 @@ package com.uav.service.wayline.service.impl;
 import com.uav.api.media.AbstractMediaService;
 import com.uav.api.wayline.AbstractWaylineService;
 import com.uav.great.context.error.CommonErrorEnum;
+import com.uav.great.context.enums.version.GatewayManager;
+import com.uav.great.context.enums.version.GatewayTypeEnum;
 import com.uav.great.context.model.CustomClaim;
 import com.uav.great.context.response.HttpResultResponse;
 import com.uav.great.mqtt.core.consume.MqttReply;
@@ -312,8 +314,10 @@ public class FlightTaskServiceImpl extends AbstractWaylineService implements IFl
             flightTask.setExecutableConditions(waylineJob.getConditions().getExecutableConditions());
         }
 
-        TopicServicesResponse<ServicesReplyData> serviceReply = abstractWaylineService.flighttaskPrepare(
-                SDKManager.getDeviceSDK(waylineJob.getDockSn()), flightTask);
+        GatewayManager gateway = SDKManager.getDeviceSDK(waylineJob.getDockSn());
+        TopicServicesResponse<ServicesReplyData> serviceReply = isRc(gateway)
+                ? abstractWaylineService.flighttaskPrepareRc(gateway, flightTask)
+                : abstractWaylineService.flighttaskPrepare(gateway, flightTask);
         if (!serviceReply.getData().getResult().isSuccess()) {
             log.info("Prepare task ====> Error code: {}", serviceReply.getData().getResult());
             waylineJobService.updateJob(WaylineJobDTO.builder()
@@ -344,8 +348,11 @@ public class FlightTaskServiceImpl extends AbstractWaylineService implements IFl
 
         WaylineJobDTO job = waylineJob.get();
 
-        TopicServicesResponse<ServicesReplyData> serviceReply = abstractWaylineService.flighttaskExecute(
-                SDKManager.getDeviceSDK(job.getDockSn()), new FlighttaskExecuteRequest().setFlightId(jobId));
+        GatewayManager gateway = SDKManager.getDeviceSDK(job.getDockSn());
+        FlighttaskExecuteRequest request = new FlighttaskExecuteRequest().setFlightId(jobId);
+        TopicServicesResponse<ServicesReplyData> serviceReply = isRc(gateway)
+                ? abstractWaylineService.flighttaskExecuteRc(gateway, request)
+                : abstractWaylineService.flighttaskExecute(gateway, request);
         if (!serviceReply.getData().getResult().isSuccess()) {
             log.info("Execute job ====> Error: {}", serviceReply.getData().getResult());
             waylineJobService.updateJob(WaylineJobDTO.builder()
@@ -396,8 +403,11 @@ public class FlightTaskServiceImpl extends AbstractWaylineService implements IFl
             throw new RuntimeException("Dock is offline.");
         }
 
-        TopicServicesResponse<ServicesReplyData> serviceReply = abstractWaylineService.flighttaskUndo(SDKManager.getDeviceSDK(dockSn),
-                new FlighttaskUndoRequest().setFlightIds(jobIds));
+        GatewayManager gateway = SDKManager.getDeviceSDK(dockSn);
+        FlighttaskUndoRequest request = new FlighttaskUndoRequest().setFlightIds(jobIds);
+        TopicServicesResponse<ServicesReplyData> serviceReply = isRc(gateway)
+                ? abstractWaylineService.flighttaskUndoRc(gateway, request)
+                : abstractWaylineService.flighttaskUndo(gateway, request);
         if (!serviceReply.getData().getResult().isSuccess()) {
             log.info("Cancel job ====> Error: {}", serviceReply.getData().getResult());
             throw new RuntimeException("Failed to cancel the wayline job of " + dockSn);
@@ -464,7 +474,10 @@ public class FlightTaskServiceImpl extends AbstractWaylineService implements IFl
             return;
         }
 
-        TopicServicesResponse<ServicesReplyData> reply = abstractWaylineService.flighttaskPause(SDKManager.getDeviceSDK(dockSn));
+        GatewayManager gateway = SDKManager.getDeviceSDK(dockSn);
+        TopicServicesResponse<ServicesReplyData> reply = isRc(gateway)
+                ? abstractWaylineService.flighttaskPauseRc(gateway)
+                : abstractWaylineService.flighttaskPause(gateway);
         if (!reply.getData().getResult().isSuccess()) {
             throw new RuntimeException("Failed to pause wayline job. Error: " + reply.getData().getResult());
         }
@@ -478,7 +491,10 @@ public class FlightTaskServiceImpl extends AbstractWaylineService implements IFl
             waylineRedisService.setRunningWaylineJob(dockSn, runningDataOpt.get());
             return;
         }
-        TopicServicesResponse<ServicesReplyData> reply = abstractWaylineService.flighttaskRecovery(SDKManager.getDeviceSDK(dockSn));
+        GatewayManager gateway = SDKManager.getDeviceSDK(dockSn);
+        TopicServicesResponse<ServicesReplyData> reply = isRc(gateway)
+                ? abstractWaylineService.flighttaskRecoveryRc(gateway)
+                : abstractWaylineService.flighttaskRecovery(gateway);
         if (!reply.getData().getResult().isSuccess()) {
             throw new RuntimeException("Failed to resume wayline job. Error: " + reply.getData().getResult());
         }
@@ -505,6 +521,10 @@ public class FlightTaskServiceImpl extends AbstractWaylineService implements IFl
 
         waylineJob.setJobId(newJob.getJobId());
         waylineRedisService.setConditionalWaylineJob(waylineJob);
+    }
+
+    private boolean isRc(GatewayManager gateway) {
+        return GatewayTypeEnum.RC == gateway.getType();
     }
 
 

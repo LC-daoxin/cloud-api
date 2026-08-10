@@ -7,9 +7,13 @@ import com.uav.api.debug.AbstractDebugService;
 
 import com.uav.great.context.exception.CloudSDKErrorEnum;
 import com.uav.great.context.response.HttpResultResponse;
+import com.uav.great.context.enums.version.GatewayManager;
+import com.uav.great.context.enums.version.GatewayTypeEnum;
 import com.uav.great.mqtt.enums.debug.DebugMethodEnum;
 import com.uav.great.mqtt.enums.device.DockModeCodeEnum;
 import com.uav.great.mqtt.enums.device.DroneModeCodeEnum;
+import com.uav.great.mqtt.enums.control.PayloadControlMethodEnum;
+import com.uav.great.mqtt.model.control.CameraLookAtRequest;
 import com.uav.great.mqtt.model.control.FlyToPointRequest;
 import com.uav.great.mqtt.model.control.PayloadAuthorityGrabRequest;
 import com.uav.great.mqtt.model.control.TakeoffToPointRequest;
@@ -80,6 +84,7 @@ public class ControlServiceImpl implements IControlService {
     public HttpResultResponse controlDockDebug(String sn, RemoteDebugMethodEnum controlMethodEnum, RemoteDebugParam param) {
         DebugMethodEnum methodEnum = controlMethodEnum.getDebugMethodEnum();
         RemoteDebugHandler data = checkDebugCondition(sn, param, controlMethodEnum);
+        GatewayManager gateway = SDKManager.getDeviceSDK(sn);
 
         boolean isExist = deviceRedisService.checkDeviceOnline(sn);
         if (!isExist) {
@@ -88,13 +93,17 @@ public class ControlServiceImpl implements IControlService {
         TopicServicesResponse response;
         switch (controlMethodEnum) {
             case RETURN_HOME:
-                response = abstractWaylineService.returnHome(SDKManager.getDeviceSDK(sn));
+                response = isRc(gateway)
+                        ? abstractWaylineService.returnHomeRc(gateway)
+                        : abstractWaylineService.returnHome(gateway);
                 break;
             case RETURN_HOME_CANCEL:
-                response = abstractWaylineService.returnHomeCancel(SDKManager.getDeviceSDK(sn));
+                response = isRc(gateway)
+                        ? abstractWaylineService.returnHomeCancelRc(gateway)
+                        : abstractWaylineService.returnHomeCancel(gateway);
                 break;
             default:
-                response = abstractDebugService.remoteDebug(SDKManager.getDeviceSDK(sn), methodEnum,
+                response = abstractDebugService.remoteDebug(gateway, methodEnum,
                         Objects.nonNull(methodEnum.getClazz()) ? mapper.convertValue(data, methodEnum.getClazz()) : null);
         }
         ServicesReplyData serviceReply = (ServicesReplyData) response.getData();
@@ -127,8 +136,11 @@ public class ControlServiceImpl implements IControlService {
         checkFlyToCondition(sn);
 
         param.setFlyToId(UUID.randomUUID().toString());
-        TopicServicesResponse<ServicesReplyData> response = abstractControlService.flyToPoint(
-                SDKManager.getDeviceSDK(sn), mapper.convertValue(param, FlyToPointRequest.class));
+        GatewayManager gateway = SDKManager.getDeviceSDK(sn);
+        FlyToPointRequest request = mapper.convertValue(param, FlyToPointRequest.class);
+        TopicServicesResponse<ServicesReplyData> response = isRc(gateway)
+                ? abstractControlService.flyToPointRc(gateway, request)
+                : abstractControlService.flyToPoint(gateway, request);
         ServicesReplyData reply = response.getData();
         return reply.getResult().isSuccess() ?
                 HttpResultResponse.success()
@@ -137,7 +149,10 @@ public class ControlServiceImpl implements IControlService {
 
     @Override
     public HttpResultResponse flyToPointStop(String sn) {
-        TopicServicesResponse<ServicesReplyData> response = abstractControlService.flyToPointStop(SDKManager.getDeviceSDK(sn));
+        GatewayManager gateway = SDKManager.getDeviceSDK(sn);
+        TopicServicesResponse<ServicesReplyData> response = isRc(gateway)
+                ? abstractControlService.flyToPointStopRc(gateway)
+                : abstractControlService.flyToPointStop(gateway);
         ServicesReplyData reply = response.getData();
 
         return reply.getResult().isSuccess() ?
@@ -147,7 +162,14 @@ public class ControlServiceImpl implements IControlService {
 
     private void checkTakeoffCondition(String dockSn) {
         Optional<DeviceDTO> dockOpt = deviceRedisService.getDeviceOnline(dockSn);
-        if (dockOpt.isEmpty() || DockModeCodeEnum.IDLE != deviceService.getDockMode(dockSn)) {
+        if (dockOpt.isEmpty()) {
+            throw new RuntimeException("The current state does not support takeoff.");
+        }
+        GatewayManager gateway = SDKManager.getDeviceSDK(dockSn);
+        boolean ready = isRc(gateway)
+                ? DroneModeCodeEnum.IDLE == deviceService.getDeviceMode(dockOpt.get().getChildDeviceSn())
+                : DockModeCodeEnum.IDLE == deviceService.getDockMode(dockSn);
+        if (!ready) {
             throw new RuntimeException("The current state does not support takeoff.");
         }
 
@@ -163,8 +185,11 @@ public class ControlServiceImpl implements IControlService {
         checkTakeoffCondition(sn);
 
         param.setFlightId(UUID.randomUUID().toString());
-        TopicServicesResponse<ServicesReplyData> response = abstractControlService.takeoffToPoint(
-                SDKManager.getDeviceSDK(sn), mapper.convertValue(param, TakeoffToPointRequest.class));
+        GatewayManager gateway = SDKManager.getDeviceSDK(sn);
+        TakeoffToPointRequest request = mapper.convertValue(param, TakeoffToPointRequest.class);
+        TopicServicesResponse<ServicesReplyData> response = isRc(gateway)
+                ? abstractControlService.takeoffToPointRc(gateway, request)
+                : abstractControlService.takeoffToPoint(gateway, request);
         ServicesReplyData reply = response.getData();
         return reply.getResult().isSuccess() ?
                 HttpResultResponse.success()
@@ -173,20 +198,26 @@ public class ControlServiceImpl implements IControlService {
 
     @Override
     public HttpResultResponse seizeAuthority(String sn, DroneAuthorityEnum authority, DronePayloadParam param) {
+        GatewayManager gateway = SDKManager.getDeviceSDK(sn);
         TopicServicesResponse<ServicesReplyData> response;
         switch (authority) {
             case FLIGHT:
                 if (deviceService.checkAuthorityFlight(sn)) {
                     return HttpResultResponse.success();
                 }
-                response = abstractControlService.flightAuthorityGrab(SDKManager.getDeviceSDK(sn));
+                response = isRc(gateway)
+                        ? abstractControlService.flightAuthorityGrabRc(gateway)
+                        : abstractControlService.flightAuthorityGrab(gateway);
                 break;
             case PAYLOAD:
                 if (checkPayloadAuthority(sn, param.getPayloadIndex())) {
                     return HttpResultResponse.success();
                 }
-                response = abstractControlService.payloadAuthorityGrab(SDKManager.getDeviceSDK(sn),
-                        new PayloadAuthorityGrabRequest().setPayloadIndex(new PayloadIndex(param.getPayloadIndex())));
+                PayloadAuthorityGrabRequest request = new PayloadAuthorityGrabRequest()
+                        .setPayloadIndex(new PayloadIndex(param.getPayloadIndex()));
+                response = isRc(gateway)
+                        ? abstractControlService.payloadAuthorityGrabRc(gateway, request)
+                        : abstractControlService.payloadAuthorityGrab(gateway, request);
                 break;
             default:
                 return HttpResultResponse.error(CloudSDKErrorEnum.INVALID_PARAMETER);
@@ -213,13 +244,24 @@ public class ControlServiceImpl implements IControlService {
                 .newInstance(param.getData())
                 .checkCondition(param.getSn());
 
-        TopicServicesResponse<ServicesReplyData> response = abstractControlService.payloadControl(
-                SDKManager.getDeviceSDK(param.getSn()), param.getCmd().getCmd(),
-                mapper.convertValue(param.getData(), param.getCmd().getCmd().getClazz()));
+        GatewayManager gateway = SDKManager.getDeviceSDK(param.getSn());
+        PayloadControlMethodEnum command = param.getCmd().getCmd();
+        TopicServicesResponse<ServicesReplyData> response;
+        if (isRc(gateway) && PayloadControlMethodEnum.CAMERA_LOOK_AT == command) {
+            response = abstractControlService.cameraLookAtRc(
+                    gateway, mapper.convertValue(param.getData(), CameraLookAtRequest.class));
+        } else {
+            response = abstractControlService.payloadControl(
+                    gateway, command, mapper.convertValue(param.getData(), command.getClazz()));
+        }
 
         ServicesReplyData serviceReply = response.getData();
         return serviceReply.getResult().isSuccess() ?
                 HttpResultResponse.success()
                 : HttpResultResponse.error(serviceReply.getResult());
+    }
+
+    private boolean isRc(GatewayManager gateway) {
+        return GatewayTypeEnum.RC == gateway.getType();
     }
 }

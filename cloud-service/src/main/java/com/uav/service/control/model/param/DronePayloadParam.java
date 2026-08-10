@@ -36,4 +36,13 @@ public class DronePayloadParam {
     private Double y;
 
     private GimbalResetModeEnum resetMode;
+
+    @Range(min = -90, max = 90)
+    private Double latitude;
+
+    @Range(min = -180, max = 180)
+    private Double longitude;
+
+    @Range(min = 2, max = 10000)
+    private Float height;
 }

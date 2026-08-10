@@ -12,6 +12,7 @@ import com.uav.great.mqtt.model.control.TakeoffToPointProgress;
 import com.uav.great.websocket.enums.BizCodeEnum;
 import com.uav.great.websocket.enums.UserTypeEnum;
 import com.uav.great.websocket.service.IWebSocketMessageService;
+import com.uav.service.control.model.dto.FlyToPointProgressNotifyDTO;
 import com.uav.service.control.model.dto.ResultNotifyDTO;
 import com.uav.service.manage.model.dto.DeviceDTO;
 import com.uav.service.manage.service.IDeviceRedisService;
@@ -49,9 +50,15 @@ public class SDKControlService extends AbstractControlService {
         FlyToPointProgress eventsReceiver = request.getData();
         webSocketMessageService.sendBatch(deviceOpt.get().getWorkspaceId(), UserTypeEnum.WEB.getVal(),
                 BizCodeEnum.FLY_TO_POINT_PROGRESS.getCode(),
-                ResultNotifyDTO.builder().sn(dockSn)
+                FlyToPointProgressNotifyDTO.builder().sn(dockSn)
                         .message(eventsReceiver.getResult().toString())
                         .result(eventsReceiver.getResult().getCode())
+                        .flyToId(eventsReceiver.getFlyToId())
+                        .status(eventsReceiver.getStatus())
+                        .wayPointIndex(eventsReceiver.getWayPointIndex())
+                        .remainingDistance(eventsReceiver.getRemainingDistance())
+                        .remainingTime(eventsReceiver.getRemainingTime())
+                        .plannedPathPoints(eventsReceiver.getPlannedPathPoints())
                         .build());
         return new TopicEventsResponse<MqttReply>().setData(MqttReply.success());
     }

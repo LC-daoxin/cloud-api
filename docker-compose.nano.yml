@@ -1,25 +1,44 @@
 version: "3.9"
 
+# ------------------------------------------------------------------------------------
+# Jetson Nano 单节点部署专用 compose 文件（host 网络模式）
+#
+# 用法：
+#   docker compose -f docker-compose.nano.yml --env-file .env up -d
+#
+# 与根目录 docker-compose.yml 的区别：
+#   1. 所有服务使用 network_mode: host，不再走 Docker 桥接网络。
+#      这样 mqtt_addr / OSS 预签名 URL 等"回传给外部客户端"的地址可以直接使用
+#      本机固定局域网 IP，而应用容器内部访问 MySQL/Redis/MQTT/MinIO 时统一用 127.0.0.1，
+#      彻底避免桥接网络下的 hairpin NAT 是否生效的不确定性。
+#   2. app 不在这里 build，而是使用预先构建、并通过 docker save/load（或私有镜像仓库）
+#      分发到每台 Nano 的固定镜像 tag，4 个节点共用同一个镜像。
+#   3. 需要配合每个节点各自的 .env 文件使用（参考根目录 .env.example）。
+#
+# 注意：host 网络模式下容器会直接占用宿主机端口，务必确保 Nano 上没有端口冲突
+# （3306/3307 二选一即可，此文件里数据库固定使用标准 3306）。
+# ------------------------------------------------------------------------------------
+
 services:
   mediamtx:
     image: bluenviron/mediamtx:1.19.3
     container_name: uav-mediamtx
     restart: unless-stopped
+    network_mode: host
     volumes:
       - ./docker/mediamtx.yml:/mediamtx.yml:ro
-    ports:
-      - "8554:8554"   # RTSP
-      - "8889:8889"   # WebRTC (WHEP)
 
   mysql:
     image: mysql:8.0
     container_name: uav-mysql
     restart: unless-stopped
+    network_mode: host
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-devroot}
       MYSQL_DATABASE: ${DB_NAME:-cloud_sample}
       MYSQL_USER: ${DB_USER:-uav_cloud}
       MYSQL_PASSWORD: ${DB_PASSWORD:-devpass}
+      MYSQL_TCP_PORT: "3306"
       TZ: Asia/Shanghai
     command:
       - --character-set-server=utf8mb4
@@ -27,13 +46,12 @@ services:
       - --innodb_buffer_pool_size=128M
       - --max_connections=50
       - --performance_schema=OFF
+      - --port=3306
     volumes:
       - mysql_data:/var/lib/mysql
       - ./sql/cloud_api.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    ports:
-      - "3307:3306"   # 本机 3306 被占用，宿主机用 3307
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-devroot}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-devroot}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -42,11 +60,10 @@ services:
     image: redis:7-alpine
     container_name: uav-redis
     restart: unless-stopped
-    command: redis-server --maxmemory 128mb --maxmemory-policy allkeys-lru
+    network_mode: host
+    command: redis-server --port 6379 --maxmemory 128mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
-    ports:
-      - "6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -57,34 +74,32 @@ services:
     image: eclipse-mosquitto:2
     container_name: uav-mqtt
     restart: unless-stopped
+    network_mode: host
     volumes:
       - ./docker/mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
       - mqtt_data:/mosquitto/data
       - mqtt_log:/mosquitto/log
-    ports:
-      - "1883:1883"
-      - "9001:9001"
 
   minio:
     image: minio/minio:latest
     container_name: uav-minio
     restart: unless-stopped
-    command: server /data --console-address ":9001"
+    network_mode: host
+    # host 网络下不能与应用共用 9000；MinIO API 固定使用 9100。
+    command: server /data --address ":9100" --console-address ":9101"
     environment:
       MINIO_ROOT_USER: ${OSS_ACCESS_KEY:-minioadmin}
       MINIO_ROOT_PASSWORD: ${OSS_SECRET_KEY:-minioadmin}
     volumes:
       - minio_data:/data
-    ports:
-      - "9100:9000"
-      - "9101:9001"
 
   app:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    # 4 台 Nano 共用同一个镜像 tag，不在 Nano 上现场 build。
+    # 构建/导出方式见部署手册："镜像构建与分发"一节。
+    image: ${APP_IMAGE:-uav-cloud-api-app:1.10.0}
     container_name: uav-cloud-app
     restart: unless-stopped
+    network_mode: host
     depends_on:
       mysql:
         condition: service_healthy
@@ -97,31 +112,31 @@ services:
     environment:
       - JAVA_OPTS=-Xms256m -Xmx768m -XX:MaxMetaspaceSize=256m -XX:+UseG1GC
       - TZ=Asia/Shanghai
-      # 以下变量均由 docker/config/application.yml 中的 ${VAR:default} 占位符读取；
-      # 单机部署留空即可（沿用 default），多节点独立部署通过 .env 覆盖
-      - DB_HOST=${DB_HOST:-mysql}
-      - DB_PORT=${DB_PORT:-3306}
+      # host 网络模式下，容器内部访问同机其他容器一律走 127.0.0.1
+      - DB_HOST=127.0.0.1
+      - DB_PORT=3306
       - DB_NAME=${DB_NAME:-cloud_sample}
       - DB_USER=${DB_USER:-uav_cloud}
       - DB_PASSWORD=${DB_PASSWORD:-devpass}
-      - REDIS_HOST=${REDIS_HOST:-redis}
-      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_HOST=127.0.0.1
+      - REDIS_PORT=6379
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
-      - BROKER_HOST=${MQTT_HOST:-mqtt}
-      - BROKER_PORT=${MQTT_PORT:-1883}
-      - BROKER_DRC_PORT=${MQTT_DRC_PORT:-9001}
-      - OSS_ENDPOINT=${OSS_ENDPOINT:-http://minio:9000}
+      # 下面几项对外暴露给 Pilot App / 遥控器 / 无人机，必须是本节点固定局域网 IP
+      # 注意：不能使用 MQTT_ 开头的环境变量名，否则会被 Spring Boot 松散绑定到 mqtt.* 命名空间，
+      # 与应用代码中 mqtt 节点被绑定为 Map 的逻辑冲突导致启动失败
+      - BROKER_HOST=${NODE_LAN_IP}
+      - BROKER_PORT=1883
+      - BROKER_DRC_PORT=9001
+      - OSS_ENDPOINT=http://${NODE_LAN_IP}:9100
       - OSS_ACCESS_KEY=${OSS_ACCESS_KEY:-minioadmin}
       - OSS_SECRET_KEY=${OSS_SECRET_KEY:-minioadmin}
-      - JWT_SECRET=${JWT_SECRET:-dev-local-secret-replace-in-production-32chars}
+      - JWT_SECRET=${JWT_SECRET:?请在 .env 中为每个节点设置独立的 JWT_SECRET}
       - RTSP_USERNAME=${RTSP_USERNAME:-admin}
       - RTSP_PASSWORD=${RTSP_PASSWORD:-admin}
-      - RTSP_PORT=${RTSP_PORT:-8554}
+      - RTSP_PORT=8554
     volumes:
       - ./docker/config/application.yml:/app/config/application.yml:ro
       - app_logs:/app/logs
-    ports:
-      - "9000:9000"
     healthcheck:
       test: ["CMD-SHELL", "kill -0 1 2>/dev/null && exit 0 || exit 1"]
       interval: 30s

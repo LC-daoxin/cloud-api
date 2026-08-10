@@ -1,11 +1,11 @@
 """
-demo_09_takeoff_to_point.py —— 机巢起飞并飞向指定坐标
+demo_10_takeoff_to_point.py -- 一键起飞并飞向指定坐标
 
-前提：无人机在机巢内，机巢处于 IDLE 状态。
+前提：无人机已连接且在线（遥控器作为地面站上云），无人机处于可起飞状态。
      服务端会自动抢占飞行控制权。
 
 运行：
-    python3 demo_09_takeoff_to_point.py
+    python3 demo_10_takeoff_to_point.py
 """
 import requests
 from config import BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG, DOCK_SN
@@ -52,13 +52,13 @@ def takeoff_to_point(token):
     if result.get("code") == 0:
         print("[✓] 起飞指令已下发！")
         print("    飞行进度通过 WebSocket 推送: bizCode=takeoff_to_point_progress")
-        print("    可运行 demo_07_websocket_osd.py 实时查看进度")
+        print("    可运行 demo_03_websocket_osd.py 实时查看进度")
     else:
         print(f"[✗] 起飞失败: {result}")
 
 if __name__ == "__main__":
-    print(f"[*] 目标机巢: {DOCK_SN}")
-    confirm = input(f"\n即将从机巢起飞并飞向 ({TARGET_LATITUDE}, {TARGET_LONGITUDE})，确认? (yes/n): ")
+    print(f"[*] 目标设备: {DOCK_SN}")
+    confirm = input(f"\n即将一键起飞并飞向 ({TARGET_LATITUDE}, {TARGET_LONGITUDE})，确认? (yes/n): ")
 
     if confirm.lower() == "yes":
         token = get_token()

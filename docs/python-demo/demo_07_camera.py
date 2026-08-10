@@ -1,10 +1,10 @@
 """
-demo_05_camera.py —— 拍照 / 开始录像 / 停止录像
+demo_07_camera.py —— 拍照 / 开始录像 / 停止录像
 
 运行：
-    python3 demo_05_camera.py photo       # 拍一张照片
-    python3 demo_05_camera.py rec_start   # 开始录像
-    python3 demo_05_camera.py rec_stop    # 停止录像
+    python3 demo_07_camera.py photo       # 拍一张照片
+    python3 demo_07_camera.py rec_start   # 开始录像
+    python3 demo_07_camera.py rec_stop    # 停止录像
 """
 import sys
 import requests
@@ -50,7 +50,7 @@ def send_payload_cmd(token, cmd: str, extra: dict = None):
 if __name__ == "__main__":
     action = sys.argv[1] if len(sys.argv) > 1 else "photo"
 
-    print(f"[*] 目标机巢: {DOCK_SN}  负载: {PAYLOAD_INDEX}")
+    print(f"[*] 目标设备: {DOCK_SN}  负载: {PAYLOAD_INDEX}")
     token = get_token()
     seize_payload_authority(token)
 
@@ -69,4 +69,4 @@ if __name__ == "__main__":
 
     else:
         print(f"未知操作: {action}")
-        print("用法: python3 demo_05_camera.py [photo|rec_start|rec_stop]")
+        print("用法: python3 demo_07_camera.py [photo|rec_start|rec_stop]")

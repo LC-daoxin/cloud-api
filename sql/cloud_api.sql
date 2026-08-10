@@ -327,7 +327,7 @@ LOCK TABLES `manage_user` WRITE;
 
 INSERT INTO `manage_user` (`id`, `user_id`, `username`, `password`, `workspace_id`, `user_type`, `mqtt_username`, `mqtt_password`, `create_time`, `update_time`)
 VALUES
-	(1,'a1559e7c-8dd8-4780-b952-100cc4797da2','adminPC','adminPC','e3dea0f5-37f2-4d79-ae58-490af3228069',1,'admin','admin',1634898410751,1650880112310),
+	(1,'a1559e7c-8dd8-4780-b952-100cc4797da2','admin','Yoox@123456','e3dea0f5-37f2-4d79-ae58-490af3228069',1,'admin','admin',1634898410751,1650880112310),
 	(2,'be7c6c3d-afe9-4be4-b9eb-c55066c0914e','pilot','pilot123','e3dea0f5-37f2-4d79-ae58-490af3228069',2,'pilot','pilot123',1634898410751,1634898410751);
 
 /*!40000 ALTER TABLE `manage_user` ENABLE KEYS */;
@@ -525,4 +525,3 @@ CREATE TABLE `wayline_job` (
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
 /*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
-

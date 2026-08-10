@@ -1,7 +1,7 @@
 """
-demo_14_mqtt_osd.py -- 通过 MQTT 直接订阅设备 OSD 原始数据
+demo_04_mqtt_osd.py -- 通过 MQTT 直接订阅设备 OSD 原始数据
 
-比 demo_07 (WebSocket) 获取的数据更完整：
+比 demo_03 (WebSocket) 获取的数据更完整：
   - 遥控器 OSD: 图传质量、4G状态、直播能力、设备列表、无人机摘要
   - 无人机 OSD: 位置、速度、姿态、NED坐标、电池、GPS/RTK、相机参数(焦距/视场角/
                 拍照状态/录像状态/剩余数量)、云台角度、避障、限高限远、
@@ -10,7 +10,7 @@ demo_14_mqtt_osd.py -- 通过 MQTT 直接订阅设备 OSD 原始数据
 依赖：pip install paho-mqtt
 
 运行：
-    python3 demo_14_mqtt_osd.py
+    python3 demo_04_mqtt_osd.py
 """
 import sys
 import json
@@ -46,7 +46,7 @@ def on_message(client, userdata, msg):
 
 
 def _print_gateway_osd(sn, gateway, data):
-    """打印遥控器/机巢 OSD"""
+    """打印遥控器 OSD"""
     print(f"{'='*72}")
     print(f"[遥控器 OSD] SN={sn}")
     print(f"  电量: {data.get('capacity_percent','N/A')}%")
@@ -185,7 +185,7 @@ if __name__ == "__main__":
     print(f"[*] 账号: {MQTT_USERNAME}")
     print()
 
-    client_id = f"demo_14_{int(time.time())}"
+    client_id = f"demo_04_{int(time.time())}"
     client = mqtt.Client(client_id=client_id)
     client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     client.on_connect = on_connect

@@ -1,5 +1,5 @@
 """
-demo_02_devices.py -- 查询在线设备列表，获取机巢/无人机 SN 和负载索引
+demo_02_devices.py -- 查询在线设备列表，获取遥控器/无人机 SN 和负载索引
 
 运行：
     python3 demo_02_devices.py
@@ -108,7 +108,7 @@ def get_devices(token):
     else:
         print(f"\n[!] 直播能力为空（设备未上报 capability）")
         print(f"    PAYLOAD_INDEX 只能从 OSD 数据获取：")
-        print(f"    1. 运行 demo_07_websocket_osd.py")
+        print(f"    1. 运行 demo_03_websocket_osd.py")
         print(f"    2. 查看推送的 OSD 消息中 payloads[].payload_index 字段")
         print("    3. 格式为 'domain-type-subtype'，如 '1-10052-0'")
 

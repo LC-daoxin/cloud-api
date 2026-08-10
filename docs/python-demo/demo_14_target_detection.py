@@ -1,5 +1,5 @@
 """
-demo_13_target_detection.py —— 目标识别（AI 检测）
+demo_14_target_detection.py -- 目标识别（AI 检测）
 
 [YOOX Cloud GCS 专用接口]
 原版 Cloud-API 不包含此接口，会返回 404。
@@ -18,10 +18,10 @@ demo_13_target_detection.py —— 目标识别（AI 检测）
 
 识别结果：
   通过 WebSocket bizCode=target_detect_result 推送
-  可用 demo_07_websocket_osd.py 接收（已自动显示未知 bizCode 的原始数据）
+  可用 demo_03_websocket_osd.py 接收（已自动显示未知 bizCode 的原始数据）
 
 运行：
-    python3 demo_13_target_detection.py
+    python3 demo_14_target_detection.py
 """
 import sys
 import requests
@@ -55,7 +55,7 @@ def open_target_detection(token):
     if result.get("code") == 0:
         print(f"[✓] 目标识别已开启  lens={AI_LENS_TYPE} targets={TARGET_TYPES}")
         print("    识别结果通过 WebSocket 推送（bizCode: target_detect_result）")
-        print("    可运行 demo_07_websocket_osd.py 实时接收")
+        print("    可运行 demo_03_websocket_osd.py 实时接收")
     else:
         print(f"[✗] 开启失败: {result}")
         if resp.status_code == 404:
@@ -73,7 +73,7 @@ def close_target_detection(token):
 
 
 if __name__ == "__main__":
-    print(f"[*] 目标机巢: {DOCK_SN}")
+    print(f"[*] 目标设备: {DOCK_SN}")
     if DOCK_SN == "YOUR_DOCK_SN":
         print("[✗] 请先在 config.py 中设置 DOCK_SN")
         sys.exit(1)

@@ -424,7 +424,7 @@ docker compose logs -f app
 # 1. 登录（演示账号）
 curl -sS -X POST http://localhost:9000/manage/api/v1/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"adminPC","password":"adminPC","flag":1}'
+  -d '{"username":"admin","password":"Yoox@123456","flag":1}'
 # 期望：code=0，返回 access_token
 
 # 2. 查工作空间（使用上一步返回的 token）
@@ -536,12 +536,12 @@ SQL 初始化脚本中包含两套账号（明文存储，仅供本地调试）�
 
 | 账号 | 密码 | 类型 | flag | 用途 |
 |---|---|---|---|---|
-| `adminPC` | `adminPC` | Web 端 | `1` | curl 调试、Python demo、Web 前端 |
+| `admin` | `Yoox@123456` | Web 端 | `1` | curl 调试、Python demo、Web 前端 |
 | `pilot` | `pilot123` | Pilot/App 端 | `2` | Autel Pilot App 接入 |
 
 > **Pilot App 配置要点：**
 > - 登录地址：`http://<LAN IP>:9000/manage/api/v1/login`
-> - 账号：`pilot` / `pilot123`（不能用 `adminPC`，类型不匹配）
+> - 账号：`pilot` / `pilot123`（不能用 Web 账号 `admin`，类型不匹配）
 > - MQTT 地址：`mqtt://<LAN IP>:1883`
 > - WebSocket：`ws://<LAN IP>:9000/api/v1/ws`（token 由 App 登录后自动追加）
 >

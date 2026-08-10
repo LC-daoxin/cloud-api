@@ -29,10 +29,10 @@ curl -sS http://<服务器IP>:9000/manage/api/v1/login \
 
 | 账号 | 密码 | 类型 (`flag`) | 使用场景 |
 |---|---|---|---|
-| `adminPC` | `adminPC` | `1` = Web 端 | 管理平台、API 调试、Python 脚本 |
+| `admin` | `Yoox@123456` | `1` = Web 端 | 管理平台、API 调试、Python 脚本 |
 | `pilot` | `pilot123` | `2` = Pilot/App 端 | **遥控器上的 Pilot App 接入** |
 
-> **Pilot App 必须使用 `pilot` 账号（flag=2），使用 `adminPC` 会返回 `The account type does not match.` 错误。**
+> **Pilot App 必须使用 `pilot` 账号（flag=2），使用 Web 账号 `admin` 会返回 `The account type does not match.` 错误。**
 
 账号信息存储于数据库 `manage_user` 表，如需修改密码：
 
@@ -51,7 +51,7 @@ UPDATE manage_user SET password = '新密码' WHERE username = 'pilot';
 | 配置项 | 填写值 | 备注 |
 |---|---|---|
 | **云服务器地址 / 登录地址** | `http://172.20.10.8:9000/manage/api/v1/login` | 完整登录接口路径 |
-| **账号** | `pilot` | ⚠️ 不能填 `admin` 或 `adminPC` |
+| **账号** | `pilot` | ⚠️ 不能填 Web 账号 `admin` |
 | **密码** | `pilot123` | 初始密码，生产环境应修改 |
 | **WebSocket 地址** | `ws://172.20.10.8:9000/api/v1/ws` | ⚠️ 不要在此处手动添加 token |
 | **MQTT 地址** | `mqtt://172.20.10.8:1883` | TCP 明文连接 |
@@ -143,7 +143,7 @@ Pilot App 启动
 ## 6. 常见问题
 
 ### Q1：连接时显示"账号类型不匹配"
-**原因**：填写了 `adminPC` 账号（Web 端账号），Pilot App 必须用 `flag=2` 的 pilot 账号。
+**原因**：填写了 `admin` 账号（Web 端账号），Pilot App 必须用 `flag=2` 的 pilot 账号。
 **解决**：账号改为 `pilot`，密码 `pilot123`。
 
 ### Q2：MQTT 连接失败，HTTP 连接成功

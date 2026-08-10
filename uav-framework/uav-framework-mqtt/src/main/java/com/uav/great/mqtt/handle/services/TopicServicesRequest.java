@@ -2,10 +2,21 @@ package com.uav.great.mqtt.handle.services;
 
 
 import com.uav.great.mqtt.core.CommonTopicRequest;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+
+import java.util.List;
+import java.util.Map;
 
 public class TopicServicesRequest<T> extends CommonTopicRequest<T> {
 
     private String method;
+
+    // RC 网关把无人机作为子设备管理，需通过 device_list 显式寻址无人机 SN；
+    // 非 RC 场景为 null 时不序列化，避免多发空字段。
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty("device_list")
+    private List<Map<String, String>> deviceList;
 
     public TopicServicesRequest() {
     }
@@ -17,6 +28,7 @@ public class TopicServicesRequest<T> extends CommonTopicRequest<T> {
                 ", tid='" + tid + '\'' +
                 ", bid='" + bid + '\'' +
                 ", timestamp=" + timestamp +
+                ", deviceList=" + deviceList +
                 ", data=" + data +
                 '}';
     }
@@ -27,6 +39,15 @@ public class TopicServicesRequest<T> extends CommonTopicRequest<T> {
 
     public TopicServicesRequest<T> setMethod(String method) {
         this.method = method;
+        return this;
+    }
+
+    public List<Map<String, String>> getDeviceList() {
+        return deviceList;
+    }
+
+    public TopicServicesRequest<T> setDeviceList(List<Map<String, String>> deviceList) {
+        this.deviceList = deviceList;
         return this;
     }
 

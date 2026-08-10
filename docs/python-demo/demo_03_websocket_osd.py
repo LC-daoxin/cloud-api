@@ -1,16 +1,16 @@
 """
-demo_07_websocket_osd.py -- 实时接收飞机遥测数据（OSD）
+demo_03_websocket_osd.py -- 实时接收飞机遥测数据（OSD）
 
 通过 WebSocket 订阅服务端推送，实时打印：
   - 飞机位置（经纬度、高度）
   - 电量、速度、姿态
-  - 机巢/遥控器状态
+  - 遥控器状态
   - 设备上下线、任务进度、目标识别、DRC 事件
 
 依赖：pip3 install websocket-client
 
 运行：
-    python3 demo_07_websocket_osd.py
+    python3 demo_03_websocket_osd.py
 """
 import json
 import requests
@@ -29,6 +29,15 @@ def get_token():
 
 last_msg_time = [0]
 msg_count = [0]
+
+# joystick_invalid_notify 的 reason 取值
+JOYSTICK_INVALID_REASON = {
+    0: "遥控器失联",
+    1: "低电量返航",
+    2: "低电量降落",
+    3: "靠近限飞区",
+    4: "遥控器夺权（如 B 控触发返航）",
+}
 
 
 def _fmt(val, unit=""):
@@ -60,8 +69,8 @@ def on_message(ws, message):
             print(json.dumps(data, indent=2, ensure_ascii=False))
 
         elif biz_code == "dock_osd":
-            # 机巢 OSD -- 打印完整数据
-            print(f"[机巢 #{msg_count[0]}]")
+            # 遥控器 OSD -- 打印完整数据
+            print(f"[遥控器 #{msg_count[0]}]")
             print(json.dumps(data, indent=2, ensure_ascii=False))
 
         elif biz_code == "device_online":
@@ -70,8 +79,14 @@ def on_message(ws, message):
         elif biz_code == "device_offline":
             print(f"[事件] 设备离线: {json.dumps(data, ensure_ascii=False)}")
 
-        elif biz_code in ("fly_to_point_progress", "takeoff_to_point_progress", "flighttask_progress"):
-            print(f"[进度] {biz_code}: {json.dumps(data, ensure_ascii=False)}")
+        elif biz_code == "fly_to_point_progress":
+            # 服务端已透传完整字段（需重新构建镜像生效），原始 MQTT 报文见 demo_08
+            print(f"[进度] fly_to_point_progress: status={data.get('status')} "
+                  f"result={data.get('result')} 航点={data.get('way_point_index')} "
+                  f"剩余={data.get('remaining_distance')}m/{data.get('remaining_time')}s")
+
+        elif biz_code in ("takeoff_to_point_progress", "flighttask_progress"):
+            print(f"[进度] {biz_code}: result={data.get('result')} {data.get('message', '')}")
 
         elif biz_code == "target_detect_result":
             print(f"[目标识别] {json.dumps(data, ensure_ascii=False)}")
@@ -80,7 +95,10 @@ def on_message(ws, message):
             print(f"[DRC状态] {json.dumps(data, ensure_ascii=False)}")
 
         elif biz_code == "joystick_invalid_notify":
-            print(f"[Joystick无效] {json.dumps(data, ensure_ascii=False)}")
+            reason = data.get("reason")
+            desc = JOYSTICK_INVALID_REASON.get(reason, "未知原因")
+            print(f"[!!] Joystick 已失效: reason={reason} {desc}")
+            print("     drone_control 不再生效，手动操控不可用")
 
         else:
             print(f"[消息#{msg_count[0]}] biz_code={biz_code}: {json.dumps(data, ensure_ascii=False)}")

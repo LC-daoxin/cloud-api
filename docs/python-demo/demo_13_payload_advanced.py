@@ -1,5 +1,5 @@
 """
-demo_12_payload_advanced.py —— 高级负载控制
+demo_13_payload_advanced.py —— 高级负载控制
 
 包含以下指令（部分指令需要 YOOX Cloud GCS 版本，已标注）：
   camera_screen_drag    ← 画面拖动控制（云台连续转速）[YOOX扩展]
@@ -9,10 +9,10 @@ demo_12_payload_advanced.py —— 高级负载控制
   video_storage_set     ← 视频存储镜头设置             [YOOX扩展]
 
 Cloud-API 版已支持的指令（无需 YOOX）：
-  camera_mode_switch / camera_photo_take / camera_focal_length_set 见 demo_03/05
+  camera_mode_switch / camera_photo_take / camera_focal_length_set 见 demo_05/07
 
 运行：
-    python3 demo_12_payload_advanced.py
+    python3 demo_13_payload_advanced.py
 
 注意：本 demo 针对 YOOX Cloud GCS 项目。
       如果当前运行的是原版 Cloud-API，标注 [YOOX] 的指令会返回 404 或方法未找到错误。
@@ -90,6 +90,7 @@ def camera_look_at(token, latitude: float, longitude: float, height: float):
     height:    2 ~ 10000 (米)
     """
     return send_payload_cmd(token, "camera_look_at", {
+        "locked": True,
         "latitude": latitude,
         "longitude": longitude,
         "height": height
@@ -118,7 +119,7 @@ def video_storage_set(token, lenses: list):
 
 
 if __name__ == "__main__":
-    print(f"[*] 目标机巢: {DOCK_SN}")
+    print(f"[*] 目标设备: {DOCK_SN}")
     print(f"[*] 负载索引: {PAYLOAD_INDEX}")
     if DOCK_SN == "YOUR_DOCK_SN":
         print("[✗] 请先在 config.py 中设置 DOCK_SN")

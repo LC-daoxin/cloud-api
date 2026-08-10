@@ -622,7 +622,7 @@ SQL 脚本包含本地演示账号，可用于首次验证：
 ```bash
 curl -sS -X POST http://127.0.0.1:9000/manage/api/v1/login \
   -H 'Content-Type: application/json' \
-  -d '{"username":"adminPC","password":"adminPC","flag":1}'
+  -d '{"username":"admin","password":"Yoox@123456","flag":1}'
 ```
 
 成功响应应包含 access token。随后使用返回的 token：
