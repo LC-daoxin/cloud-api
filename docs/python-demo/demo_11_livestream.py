@@ -1,10 +1,8 @@
 """
 demo_11_livestream.py -- 直播全流程
 
-支持协议：
-  url_type=1  RTMP
-  url_type=2  RTSP  ← 常用，设备推流到服务器配置的 RTSP 地址
-  url_type=3  GB28181
+本 Demo 固定使用：
+  url_type=2  RTSP，设备推流到服务器配置的 RTSP 地址
 
 video_id 格式：{drone_sn}/{payload_index}/{video_type}-0
   从 MQTT OSD 的 live_status 中获取
@@ -15,37 +13,33 @@ video_quality（仅以下值有效）：
 video_type（镜头切换，仅 zoom / ir 有效）：
   zoom / ir
 
-RTSP 发布/拉流地址格式（MediaMTX 动态路径）：
-  rtsp://{username}:{password}@{server_ip}:{port}/{drone_sn}-{payload_index}
+RTSP 拉流地址格式（MediaMTX 动态路径）：
+  rtsp://{server_ip}:{port}/{drone_sn}-{payload_index}
 
 运行：
     python3 demo_11_livestream.py
 """
-import sys
 import json
+import re
 import shutil
 import subprocess
 import time
-import requests
 import paho.mqtt.client as mqtt
-from config import BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG, \
-    SERVER_IP, MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD
+from config import (
+    MQTT_HOST,
+    MQTT_PASSWORD,
+    MQTT_PORT,
+    MQTT_USERNAME,
+    RTSP_HOST,
+    RTSP_PORT,
+)
+from demo_common import DemoApiError, DemoError, api_call, login, print_error_and_hint
 
 
 # ── 直播配置 ──────────────────────────────────────────────
-URL_TYPE = 2          # 1=RTMP  2=RTSP  3=GB28181
+URL_TYPE = 2          # 本 Demo 与当前 P0 运行时固定使用 RTSP
 VIDEO_QUALITY = 2     # 默认标清更流畅；可在菜单中切换到 3=高清
-# RTSP 服务配置（对应 application.yml 中 livestream.url.rtsp）
-RTSP_USERNAME = "admin"
-RTSP_PASSWORD = "admin"
-RTSP_PORT = 8554
-
-
-def get_token():
-    resp = requests.post(f"{BASE_URL}/manage/api/v1/login",
-                         json={"username": WEB_USERNAME, "password": WEB_PASSWORD, "flag": WEB_FLAG},
-                         timeout=10)
-    return resp.json()["data"]["access_token"]
+# RTSP 服务配置来自 .env，对应 application.yml 中 livestream.url.rtsp。
 
 
 def get_video_ids_from_mqtt(timeout_sec=8) -> list:
@@ -87,7 +81,8 @@ def get_video_ids_from_mqtt(timeout_sec=8) -> list:
 
     client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
                          client_id=f"demo_11_{int(time.time())}")
-    client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
+    if MQTT_USERNAME:
+        client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
     client.on_connect = on_connect
     client.on_message = on_message
 
@@ -105,22 +100,12 @@ def get_video_ids_from_mqtt(timeout_sec=8) -> list:
     return video_ids
 
 
-def build_rtsp_url(video_id: str) -> str:
-    """根据 video_id 构造设备发布到 MediaMTX 的完整 RTSP 地址"""
-    # video_id 格式: drone_sn/payload_index/video_type-0
-    parts = video_id.split("/")
-    drone_sn = parts[0] if len(parts) > 0 else "unknown"
-    payload_index = parts[1] if len(parts) > 1 else "0-0-0"
-    stream_name = f"{drone_sn}-{payload_index}"
-    return f"rtsp://{RTSP_USERNAME}:{RTSP_PASSWORD}@{SERVER_IP}:{RTSP_PORT}/{stream_name}"
-
-
 def build_rtsp_playback_url(video_id: str) -> str:
     """不带账号密码的拉流地址（展示/播放提示用，避免在终端泄露凭据）"""
     parts = video_id.split("/")
     drone_sn = parts[0] if len(parts) > 0 else "unknown"
     payload_index = parts[1] if len(parts) > 1 else "0-0-0"
-    return f"rtsp://{SERVER_IP}:{RTSP_PORT}/{drone_sn}-{payload_index}"
+    return f"rtsp://{RTSP_HOST}:{RTSP_PORT}/{drone_sn}-{payload_index}"
 
 
 def parse_video_type(video_id: str) -> str:
@@ -140,12 +125,12 @@ def resolve_alternate_lens(desired_lens: str) -> str:
     return "ir"
 
 
-def probe_rtsp(rtsp_url: str, timeout_sec=12) -> bool:
-    """用 ffprobe 确认 MediaMTX 路径已收到媒体；未安装时跳过。"""
+def probe_rtsp(rtsp_url: str, timeout_sec=12) -> bool | None:
+    """用 ffprobe 确认 MediaMTX 路径。True=有流，False=已探测但无流，None=无法探测。"""
     ffprobe = shutil.which("ffprobe")
     if not ffprobe:
-        print("    [!] 未安装 ffprobe，跳过媒体流探测")
-        return False
+        print("    [!] 未安装 ffprobe，无法判定媒体流是否存在")
+        return None
     try:
         result = subprocess.run(
             [ffprobe, "-v", "error", "-rtsp_transport", "tcp",
@@ -158,13 +143,16 @@ def probe_rtsp(rtsp_url: str, timeout_sec=12) -> bool:
                 print(f"        {line}")
             return True
         detail = result.stderr.strip() or "未发现视频轨道"
+        # ffprobe 常会在 stderr 中回显输入 URL；无论调用方是否
+        # 误传了带凭证的 URL，都不允许密码进入终端日志。
+        detail = re.sub(r"(?i)rtsp://[^\s]+@", "rtsp://***@", detail)
         print(f"    [✗] RTSP 路径暂不可播放: {detail}")
     except subprocess.TimeoutExpired:
         print(f"    [✗] {timeout_sec} 秒内未收到 RTSP 视频数据")
     return False
 
 
-def live_start(token, video_id: str, url_type: int = 2, video_quality: int = 3,
+def live_start(token, video_id: str, url_type: int = 2, video_quality: int = VIDEO_QUALITY,
                video_type: str | None = None):
     """开始直播
 
@@ -180,94 +168,107 @@ def live_start(token, video_id: str, url_type: int = 2, video_quality: int = 3,
     }
     if video_type in ("zoom", "ir"):
         body["video_type"] = video_type
-    if url_type == 2:
-        # 关键：把完整 MediaMTX 发布地址下发给设备。旧实现只下发账号、
-        # 密码和端口，却在客户端猜测 /live/... 路径，服务端并无该流。
-        body["url"] = build_rtsp_url(video_id)
+    # 默认不传自定义 url：由服务端使用已配置的发布凭证，并允许
+    # LiveStreamServiceImpl 先检查 MediaMTX publisher 后复用，避免重启已有直播。
     # 服务端等待设备 MQTT 应答最坏情况可达 3次×20秒=60秒（见 AbstractLivestreamService.DEFAULT_TIMEOUT ＋
     # MqttGatewayPublish.DEFAULT_RETRY_COUNT），这里要盖过那个时长，否则会先于服务端报出 ReadTimeout
-    resp = requests.post(f"{BASE_URL}/manage/api/v1/live/streams/start",
-                         headers={"x-auth-token": token, "Content-Type": "application/json"},
-                         json=body,
-                         timeout=65)
-    result = resp.json()
-    if result.get("code") == 0:
-        print(f"[✓] 直播已开始  video_id={video_id}")
-        # 展示 RTSP 拉流地址
-        if url_type == 2:
-            live_data = result.get("data") or {}
-            rtsp_url = live_data.get("url") or build_rtsp_url(video_id)
-            playback_url = build_rtsp_playback_url(video_id)
-            print(f"    RTSP 拉流地址: {rtsp_url}")
-            print(f"    可用 ffplay 播放: ffplay -rtsp_transport tcp -fflags nobuffer+discardcorrupt "
-                  f"-flags low_delay -avioflags direct -probesize 32 -sync ext -framedrop "
-                  f"-vf setpts=0 \"{playback_url}\"")
-            print("    正在等待首帧并检查实际媒体流...")
-            probe_rtsp(rtsp_url)
-        # 也打印接口返回的 URL（如果有）
+    result = api_call(
+        token,
+        "POST",
+        "/manage/api/v1/live/streams/start",
+        action="开始直播",
+        json_body=body,
+        timeout=65,
+    )
+    print(f"[✓] 直播开始指令已受理  video_id={video_id}")
+    if url_type == 2:
         live_data = result.get("data") or {}
-        api_url = live_data.get("url") if live_data else ""
-        if api_url:
-            print(f"    接口返回地址: {api_url}")
-    else:
-        print(f"[✗] 开始直播失败: {result.get('message','')}")
+        response_url = live_data.get("url") if isinstance(live_data, dict) else None
+        playback_url = build_rtsp_playback_url(video_id)
+        print(f"    RTSP 路径（凭证已隐藏）: {playback_url}")
+        if isinstance(response_url, str) and response_url and not response_url.startswith("rtsp://"):
+            print(f"    服务端播放端点: {response_url}")
+        print("    播放地址不包含设备发布凭据；不要把服务端发布密码写入日志或命令历史。")
+        print("    正在等待首帧并检查实际媒体流...")
+        # /streams/start 在当前项目返回 WHEP 播放 URL，ffprobe 只能
+        # 探测对应的 MediaMTX RTSP 路径，不能把 data.url 当 RTSP。
+        probe_rtsp(playback_url)
     return result
 
 
 def ensure_rtsp_live(token, video_id: str) -> str | None:
     """复用现有发布流；没有流时清理设备旧状态并重新启动。"""
-    rtsp_url = build_rtsp_url(video_id)
+    rtsp_url = build_rtsp_playback_url(video_id)
     print("[*] 检查 MediaMTX 中是否已有可复用的视频流...")
-    if probe_rtsp(rtsp_url, timeout_sec=4):
+    probe = probe_rtsp(rtsp_url, timeout_sec=4)
+    if probe is True:
         print("[✓] 已有直播流，直接复用")
         return rtsp_url
 
-    print("[*] 清理设备可能遗留的旧直播状态...")
-    live_stop(token, video_id)
-    time.sleep(1)
-    result = live_start(token, video_id, URL_TYPE, VIDEO_QUALITY)
-    if result.get("code") != 0:
-        return None
+    if probe is False:
+        print("[*] 当前路径未检测到媒体；先调用服务端开始/复用接口，不提前停止设备推流")
+    else:
+        # 缺少 ffprobe 只代表“未知”，不是“无流”。不先 stop，避免
+        # 把多设备切换后仍在使用的 publisher 误关闭。
+        print("[*] 媒体状态无法探测：不停止现有 publisher，直接发送开始/复用请求")
+    try:
+        live_start(token, video_id, URL_TYPE, VIDEO_QUALITY)
+    except DemoApiError as exc:
+        try:
+            api_code = int(exc.api_code)
+        except (TypeError, ValueError):
+            api_code = 0
+        stale_device_state = (
+            not exc.ambiguous
+            and probe is False
+            and api_code % 100000 == 13003
+        )
+        if not stale_device_state:
+            raise
+        print("[!] 设备报告直播已开始，但 MediaMTX 中没有媒体；可能是设备遗留状态。")
+        if input("    输入 YES 确认停止该 video_id 后重新开始: ").strip() != "YES":
+            raise DemoError("已取消清理；未自动重发直播指令") from exc
+        live_stop(token, video_id)
+        time.sleep(1)
+        live_start(token, video_id, URL_TYPE, VIDEO_QUALITY)
 
     # live_start 已做一次首帧探测；这里再次确认发布者仍在线，避免把
     # 设备的“指令成功”误报成可播放。
-    return rtsp_url if probe_rtsp(rtsp_url, timeout_sec=6) else None
+    final_probe = probe_rtsp(rtsp_url, timeout_sec=6)
+    return rtsp_url if final_probe is not False else None
 
 
 def live_stop(token, video_id: str):
     """停止直播"""
     body = {"video_id": video_id}
-    resp = requests.post(f"{BASE_URL}/manage/api/v1/live/streams/stop",
-                         headers={"x-auth-token": token, "Content-Type": "application/json"},
-                         json=body,
-                         timeout=65)
-    result = resp.json()
-    print(f"[{'✓' if result.get('code')==0 else '✗'}] 停止直播: {result.get('message','')}")
+    result = api_call(
+        token, "POST", "/manage/api/v1/live/streams/stop",
+        action="停止直播", json_body=body, timeout=65,
+    )
+    print("[✓] 停止直播指令已受理")
     return result
 
 
 def live_set_quality(token, video_id: str, video_quality: int):
     """切换清晰度  仅 2=标清  3=高清 有效"""
     body = {"video_id": video_id, "video_quality": video_quality}
-    resp = requests.post(f"{BASE_URL}/manage/api/v1/live/streams/update",
-                         headers={"x-auth-token": token, "Content-Type": "application/json"},
-                         json=body,
-                         timeout=65)
-    result = resp.json()
+    result = api_call(
+        token, "POST", "/manage/api/v1/live/streams/update",
+        action="切换直播清晰度", json_body=body, timeout=65,
+    )
     quality_map = {2: "标清", 3: "高清"}
-    print(f"[{'✓' if result.get('code')==0 else '✗'}] 切换清晰度->{quality_map.get(video_quality, video_quality)}: {result.get('message','')}")
+    print(f"[✓] 切换清晰度 -> {quality_map.get(video_quality, video_quality)}")
     return result
 
 
 def live_switch_lens(token, video_id: str, video_type: str):
     """切换镜头  仅 zoom / ir 有效"""
     body = {"video_id": video_id, "video_type": video_type}
-    resp = requests.post(f"{BASE_URL}/manage/api/v1/live/streams/switch",
-                         headers={"x-auth-token": token, "Content-Type": "application/json"},
-                         json=body,
-                         timeout=65)
-    result = resp.json()
-    print(f"[{'✓' if result.get('code')==0 else '✗'}] 切换镜头->{video_type}: {result.get('message','')}")
+    result = api_call(
+        token, "POST", "/manage/api/v1/live/streams/switch",
+        action="切换直播镜头", json_body=body, timeout=65,
+    )
+    print(f"[✓] 切换镜头 -> {video_type}")
     return result
 
 
@@ -279,40 +280,83 @@ def live_start_recover_by_lens_switch(token, video_id: str) -> str | None:
     等待 4 秒判断首帧是否到达；未到达则临时切到备用镜头触发编码器重建，
     等 1.8 秒后切回目标镜头，再等 1.2 秒让编码器吐出目标镜头的首帧；
     若切回目标镜头失败，会补发一次纠正指令，避免设备停留在临时镜头上。"""
-    rtsp_url = build_rtsp_url(video_id)
+    rtsp_url = build_rtsp_playback_url(video_id)
     desired_lens = parse_video_type(video_id)
+    if desired_lens not in {"normal", "wide", "zoom", "ir"}:
+        print(
+            f"[✗] 镜头 {desired_lens} 不支持安全的切换恢复；"
+            "不会先切到备用镜头，请改用普通开始并检查该负载能力"
+        )
+        return None
     alternate_lens = resolve_alternate_lens(desired_lens)
 
     live_start(token, video_id, URL_TYPE, VIDEO_QUALITY, video_type=desired_lens)
 
     print("[*] 等待 4 秒检查是否已产生首帧...")
     time.sleep(4)
-    if probe_rtsp(rtsp_url, timeout_sec=3):
+    probe = probe_rtsp(rtsp_url, timeout_sec=3)
+    if probe is True:
         print("[✓] 已检测到推流")
+        return rtsp_url
+    if probe is None:
+        print("[!] 无法验证首帧，为避免不必要的镜头切换，不执行编码器恢复")
         return rtsp_url
 
     print(f"[*] 未检测到推流，临时切到 {alternate_lens} 触发编码器重建...")
-    switched_to_alternate = live_switch_lens(token, video_id, alternate_lens).get("code") == 0
-    time.sleep(1.8)
-    print(f"[*] 切回目标镜头 {desired_lens}...")
-    switch_back = live_switch_lens(token, video_id, desired_lens)
-    if switch_back.get("code") != 0 and switched_to_alternate:
-        # 切回失败但设备已经移动到临时镜头——补发一次纠正指令，避免画面停留在红外上
-        print(f"[!] 切回 {desired_lens} 失败，补发一次纠正指令...")
-        live_switch_lens(token, video_id, desired_lens)
+    alternate_may_have_applied = False
+    desired_restored = False
+    try:
+        try:
+            live_switch_lens(token, video_id, alternate_lens)
+            alternate_may_have_applied = True
+        except DemoApiError as exc:
+            alternate_may_have_applied = exc.ambiguous
+            if not exc.ambiguous:
+                raise
+            print("[!] 临时镜头切换结果未知；将继续下发目标镜头作为安全纠正，不重复临时切换。")
+        time.sleep(1.8)
+        print(f"[*] 切回目标镜头 {desired_lens}...")
+        try:
+            live_switch_lens(token, video_id, desired_lens)
+            desired_restored = True
+        except DemoApiError as first_error:
+            if not alternate_may_have_applied:
+                raise
+            # 设备可能已经移动到临时镜头。即使第一次切回结果未知，也只补发
+            # 目标镜头这一安全纠正，不再次发送临时镜头指令。
+            print(f"[!] 切回 {desired_lens} 未确认（{first_error}），补发一次目标镜头纠正指令...")
+            try:
+                live_switch_lens(token, video_id, desired_lens)
+                desired_restored = True
+            except DemoApiError as retry_error:
+                raise DemoError(
+                    f"目标镜头 {desired_lens} 连续两次未确认；请立即从画面/设备状态核验当前镜头"
+                ) from retry_error
+    finally:
+        if alternate_may_have_applied and not desired_restored:
+            # KeyboardInterrupt、sleep 异常或意外运行时错误都不能绕过镜头恢复。
+            # 保留原异常，只把本次纠正失败记录到终端。
+            print(f"[!] 恢复流程异常中断，最后尝试切回目标镜头 {desired_lens}...")
+            try:
+                live_switch_lens(token, video_id, desired_lens)
+            except Exception as correction_error:
+                print(f"[!!] 最终镜头纠正未确认: {correction_error}")
     time.sleep(1.2)
 
-    if probe_rtsp(rtsp_url, timeout_sec=6):
+    final_probe = probe_rtsp(rtsp_url, timeout_sec=6)
+    if final_probe is True:
         print("[✓] 切换镜头后已恢复推流")
+        return rtsp_url
+    if final_probe is None:
+        print("[!] 无法验证恢复结果，请从 WHEP/RTSP 播放端确认")
         return rtsp_url
 
     print("[✗] 切换镜头后仍未恢复推流")
     return None
 
 
-if __name__ == "__main__":
-    token = get_token()
-
+def main() -> int:
+    token = login()
     # 1. 从 MQTT OSD 获取 video_id（直播能力接口 camerasList 为空时走此路径）
     print("[*] 从 MQTT OSD 获取视频流...")
     video_ids = get_video_ids_from_mqtt()
@@ -320,22 +364,37 @@ if __name__ == "__main__":
     if not video_ids:
         # 回退到直播能力接口
         print("[*] MQTT 未获取到，尝试直播能力接口...")
-        resp = requests.get(f"{BASE_URL}/manage/api/v1/live/capacity",
-                            headers={"x-auth-token": token}, timeout=10)
-        for dev in resp.json().get("data", []):
-            for cam in dev.get("camerasList", []):
-                vid = f"{dev.get('sn')}/{cam.get('payload_index')}/normal-0"
-                video_ids.append(vid)
+        result = api_call(
+            token, "GET", "/manage/api/v1/live/capacity",
+            action="查询直播能力", timeout=10,
+        )
+        seen_video_ids = set(video_ids)
+        for dev in result.get("data") or []:
+            for cam in dev.get("cameras_list") or dev.get("camerasList") or []:
+                payload_index = cam.get("index") or cam.get("payload_index")
+                if not payload_index:
+                    continue
+                videos = cam.get("videos_list") or cam.get("videosList") or []
+                for video in videos:
+                    video_type = video.get("type") or video.get("video_type")
+                    if not video_type:
+                        video_index = str(video.get("index") or video.get("video_index") or "")
+                        video_type = video_index.split("-")[0]
+                    if video_type not in {"normal", "wide", "zoom", "ir", "thermal"}:
+                        continue
+                    vid = f"{dev.get('sn')}/{payload_index}/{video_type}-0"
+                    if vid not in seen_video_ids:
+                        seen_video_ids.add(vid)
+                        video_ids.append(vid)
 
     if not video_ids:
         print("[✗] 没有可用的视频流，请确认无人机已上线")
-        sys.exit(0)
+        return 1
 
     print(f"\n[✓] 可发起直播的镜头通道 ({len(video_ids)} 个，仅表示存在该 video_id，不代表当前正在推流):")
     for i, vid in enumerate(video_ids):
-        rtsp = build_rtsp_url(vid)
         print(f"  [{i}] {vid}")
-        print(f"      RTSP: {rtsp}")
+        print(f"      RTSP: {build_rtsp_playback_url(vid)}（凭证已隐藏）")
 
     # 选择视频流
     selected = video_ids[0]
@@ -345,7 +404,7 @@ if __name__ == "__main__":
             selected = video_ids[int(idx)]
 
     print(f"\n[*] 使用 video_id: {selected}")
-    print(f"[*] RTSP 地址: {build_rtsp_url(selected)}")
+    print(f"[*] RTSP 路径: {build_rtsp_playback_url(selected)}（凭证已隐藏）")
 
     print("\n操作菜单：")
     print("  1. 开始直播")
@@ -357,19 +416,37 @@ if __name__ == "__main__":
 
     while True:
         cmd = input("输入操作: ").strip()
-        if cmd == "q":
-            break
-        elif cmd == "1":
-            ensure_rtsp_live(token, selected)
-        elif cmd == "2":
-            live_stop(token, selected)
-        elif cmd == "3":
-            q = input("  清晰度(2=标清 3=高清): ").strip()
-            live_set_quality(token, selected, int(q))
-        elif cmd == "4":
-            lens = input("  镜头类型(zoom/ir): ").strip()
-            live_switch_lens(token, selected, lens)
-        elif cmd == "6":
-            live_start_recover_by_lens_switch(token, selected)
-        else:
-            print("  未知操作")
+        try:
+            if cmd == "q":
+                break
+            elif cmd == "1":
+                ensure_rtsp_live(token, selected)
+            elif cmd == "2":
+                live_stop(token, selected)
+            elif cmd == "3":
+                quality = input("  清晰度(2=标清 3=高清): ").strip()
+                if quality not in {"2", "3"}:
+                    print("  只支持 2=标清 或 3=高清")
+                    continue
+                live_set_quality(token, selected, int(quality))
+            elif cmd == "4":
+                lens = input("  镜头类型(zoom/ir): ").strip()
+                if lens not in {"zoom", "ir"}:
+                    print("  只支持 zoom 或 ir")
+                    continue
+                live_switch_lens(token, selected, lens)
+            elif cmd == "6":
+                live_start_recover_by_lens_switch(token, selected)
+            else:
+                print("  未知操作")
+        except DemoError as exc:
+            print_error_and_hint(exc)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except DemoError as exc:
+        print_error_and_hint(exc)
+        raise SystemExit(1)

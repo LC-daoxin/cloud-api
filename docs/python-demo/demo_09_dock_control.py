@@ -1,7 +1,7 @@
 """
 demo_09_dock_control.py -- 设备远程控制（返航、重启等）
 
-接口：POST /control/api/v1/devices/{sn}/jobs/{method}，请求体为 {}
+接口：POST /control/api/v1/devices/{sn}/jobs/{method}（无请求体）
 
 其中 5/6 为一键返航与取消返航，无论是否有机巢都可用；
 开舱盖/充电/推杆/补光灯等仅在机巢场景下有效。
@@ -12,13 +12,16 @@ demo_09_dock_control.py -- 设备远程控制（返航、重启等）
 
 根据菜单选择操作。
 """
-import requests
-from config import BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG, DOCK_SN
-
-if DOCK_SN == "YOUR_DOCK_SN":
-    import sys
-    print("[✗] 请先在 config.py 中设置 DOCK_SN")
-    sys.exit(1)
+from config import DOCK_SN
+from demo_common import (
+    DemoApiError,
+    DemoError,
+    api_call,
+    login,
+    print_error_and_hint,
+    require_config,
+    seize_flight_authority,
+)
 
 COMMANDS = {
     "1":  ("cover_open",           "开舱盖"),
@@ -38,12 +41,6 @@ COMMANDS = {
     "15": ("debug_mode_close",     "退出调试模式"),
 }
 
-def get_token():
-    resp = requests.post(f"{BASE_URL}/manage/api/v1/login",
-                         json={"username": WEB_USERNAME, "password": WEB_PASSWORD, "flag": WEB_FLAG},
-                         timeout=10)
-    return resp.json()["data"]["access_token"]
-
 def send_dock_command(token, cmd_id: str):
     if cmd_id not in COMMANDS:
         print(f"[!] 无效指令编号: {cmd_id}")
@@ -51,38 +48,54 @@ def send_dock_command(token, cmd_id: str):
 
     method, desc = COMMANDS[cmd_id]
 
-    # 返航会真实改变飞行器航迹，先确认
-    if method == "return_home":
-        if input("  [!] 确认一键返航？输入 YES 确认: ").strip() != "YES":
+    # 与当前 Web 控制台一致，返航及取消返航都需要二次确认并显式抢权。
+    if method in {"return_home", "return_home_cancel"}:
+        prompt = "确认一键返航？" if method == "return_home" else "确认取消返航并原地悬停？"
+        if input(f"  [!] {prompt} 输入 YES 确认: ").strip() != "YES":
             print("  已取消")
             return
-
-    url = f"{BASE_URL}/control/api/v1/devices/{DOCK_SN}/jobs/{method}"
+        try:
+            seize_flight_authority(token)
+        except DemoApiError as exc:
+            print_error_and_hint(exc)
+            return
 
     print(f"[*] 发送指令: {desc} ({method})")
-    resp = requests.post(url,
-                         headers={"x-auth-token": token, "Content-Type": "application/json"},
-                         json={},
-                         timeout=15)
-    result = resp.json()
-
-    if result.get("code") == 0:
-        print(f"[✓] {desc} 成功")
-    else:
-        print(f"[✗] {desc} 失败: {result}")
+    try:
+        api_call(
+            token,
+            "POST",
+            f"/control/api/v1/devices/{DOCK_SN}/jobs/{method}",
+            action=desc,
+        )
+        if method == "return_home":
+            print("[✓] 返航指令调用成功；这不代表已经返航或落地，请继续观察 OSD")
+        elif method == "return_home_cancel":
+            print("[✓] 取消返航调用成功；飞行器应悬停，请通过 OSD/现场确认")
+        else:
+            print(f"[✓] {desc} 调用成功")
+    except DemoApiError as exc:
+        print_error_and_hint(exc)
+        if exc.ambiguous and method in {"return_home", "return_home_cancel"}:
+            print("    先确认 OSD mode_code/现场状态；不要因客户端超时立即重复发送。")
 
 if __name__ == "__main__":
-    print(f"[*] 目标设备: {DOCK_SN}\n")
-    token = get_token()
+    try:
+        require_config(YOOX_DOCK_SN=DOCK_SN)
+        print(f"[*] 目标设备: {DOCK_SN}\n")
+        token = login()
 
-    print("设备控制菜单：")
-    for k, (method, desc) in COMMANDS.items():
-        print(f"  {k:>2}. {desc}")
-    print("   q. 退出\n")
+        print("设备控制菜单：")
+        for k, (method, desc) in COMMANDS.items():
+            print(f"  {k:>2}. {desc}")
+        print("   q. 退出\n")
 
-    while True:
-        cmd = input("选择操作编号: ").strip()
-        if cmd == "q":
-            break
-        send_dock_command(token, cmd)
-        print()
+        while True:
+            cmd = input("选择操作编号: ").strip()
+            if cmd == "q":
+                break
+            send_dock_command(token, cmd)
+            print()
+    except DemoError as exc:
+        print_error_and_hint(exc)
+        raise SystemExit(1)

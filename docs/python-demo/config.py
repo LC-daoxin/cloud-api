@@ -1,44 +1,80 @@
 """
-统一配置文件 —— 运行任何 demo 前先修改这里
+Python Demo 统一配置。
+
+配置全部来自环境变量；推荐复制 ``.env.example`` 为 ``.env``，再通过
+``./run.sh`` 启动。这里不保存服务器地址、账号密码、设备序列号或飞行坐标。
 """
+from __future__ import annotations
 
-# ── 服务器地址 ─────────────────────────────────────────
-# 将下面的 IP 改为 Mac 的局域网 IP（同一局域网内其他设备需填此地址）
-SERVER_IP = "172.20.10.8"
-SERVER_PORT = 9000
+import os
 
-BASE_URL = f"http://{SERVER_IP}:{SERVER_PORT}"
 
-# ── HTTP 登录账号 ──────────────────────────────────────
-# flag=1: Web 端账号；flag=2: Pilot 遥控器账号
-# 初始账号见 sql/cloud_api.sql（manage_user 表），默认为 admin / Yoox@123456
-WEB_USERNAME = "admin"
-WEB_PASSWORD = "Yoox@123456"
-WEB_FLAG = 1
+def _env_int(name: str, default: int) -> int:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return int(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"环境变量 {name} 必须是整数，当前值为 {raw!r}") from exc
 
-PILOT_USERNAME = "pilot"
-PILOT_PASSWORD = "pilot123"
-PILOT_FLAG = 2
 
-# ── MQTT 连接（App/Pilot 端填写）─────────────────────────
-MQTT_HOST = SERVER_IP        # 同局域网填 Mac IP
-MQTT_PORT = 1883             # TCP 明文
-MQTT_WS_PORT = 9001          # WebSocket 协议（ws://IP:9001/mqtt）
-# Mosquitto 当前允许匿名，填任意字符串即可；也可使用 SQL 中的账号
-MQTT_USERNAME = "admin"      # 对应 admin 用户的 mqtt_username
-MQTT_PASSWORD = "admin"      # 对应 admin 用户的 mqtt_password
+def _env_float(name: str, default: float | None = None) -> float | None:
+    raw = os.getenv(name, "").strip()
+    if not raw:
+        return default
+    try:
+        return float(raw)
+    except ValueError as exc:
+        raise RuntimeError(f"环境变量 {name} 必须是数字，当前值为 {raw!r}") from exc
 
-# ── WebSocket 地址 ─────────────────────────────────────
-# token 通过登录接口获取，填入后连接
-WS_URL = f"ws://{SERVER_IP}:{SERVER_PORT}/api/v1/ws"
 
-# ── 设备 SN（运行 demo_02_devices.py 后填入）────────────
-DOCK_SN = "TH7926281545"    # 遥控器 SN，控制接口的 {sn} 路径参数
-DRONE_SN = "1748FEV3HMP926231388"  # 无人机 SN
+# HTTP 服务。YOOX_BASE_URL 可覆盖 IP/端口组合，例如 https://gcs.example.com。
+SERVER_IP = os.getenv("YOOX_SERVER_IP", "127.0.0.1").strip()
+SERVER_PORT = _env_int("YOOX_SERVER_PORT", 9000)
+BASE_URL = os.getenv(
+    "YOOX_BASE_URL", f"http://{SERVER_IP}:{SERVER_PORT}"
+).strip().rstrip("/")
 
-# ── 负载索引（从直播能力接口或 OSD 中获取）──────────────
-# 格式：payload 的 domain-type-subtype，从直播能力接口 cameras_list[].index 获取
-PAYLOAD_INDEX = "10052-0-0"  # Fusion 4T 相机（1748FEV3HMP926231388）
+# Web 登录账号。密码没有可用默认值，运行前必须在 .env 中填写。
+WEB_USERNAME = os.getenv("YOOX_WEB_USERNAME", "admin").strip()
+WEB_PASSWORD = os.getenv("YOOX_WEB_PASSWORD", "change_me")
+WEB_FLAG = _env_int("YOOX_WEB_FLAG", 1)
 
-# ── 工作空间 ID（登录后从 token 解析，或查看 demo_01）──
-WORKSPACE_ID = "e3dea0f5-37f2-4d79-ae58-490af3228069"  # SQL 初始化数据
+# Pilot 登录仅供相应 Demo 使用。
+PILOT_USERNAME = os.getenv("YOOX_PILOT_USERNAME", "pilot").strip()
+PILOT_PASSWORD = os.getenv("YOOX_PILOT_PASSWORD", "change_me")
+PILOT_FLAG = _env_int("YOOX_PILOT_FLAG", 2)
+
+# 主 MQTT Broker（OSD、事件和 services_reply 旁路监听）。
+MQTT_HOST = os.getenv("YOOX_MQTT_HOST", SERVER_IP).strip()
+MQTT_PORT = _env_int("YOOX_MQTT_PORT", 1883)
+MQTT_WS_PORT = _env_int("YOOX_MQTT_WS_PORT", 9001)
+MQTT_USERNAME = os.getenv("YOOX_MQTT_USERNAME", "").strip()
+MQTT_PASSWORD = os.getenv("YOOX_MQTT_PASSWORD", "")
+
+# Demo 只拼接不含发布凭据的 MediaMTX RTSP 播放路径；设备发布凭据由服务端管理。
+RTSP_HOST = os.getenv("YOOX_RTSP_HOST", SERVER_IP).strip()
+RTSP_PORT = _env_int("YOOX_RTSP_PORT", 8554)
+
+# WebSocket 地址可单独覆盖（反向代理/TLS 场景常用 wss://）。
+WS_URL = os.getenv(
+    "YOOX_WS_URL", f"ws://{SERVER_IP}:{SERVER_PORT}/api/v1/ws"
+).strip()
+
+# 设备与工作空间。使用显眼占位符，防止样例误操作真实设备。
+DOCK_SN = os.getenv("YOOX_DOCK_SN", "YOUR_DOCK_SN").strip()
+DRONE_SN = os.getenv("YOOX_DRONE_SN", "YOUR_DRONE_SN").strip()
+PAYLOAD_INDEX = os.getenv("YOOX_PAYLOAD_INDEX", "YOUR_PAYLOAD_INDEX").strip()
+WORKSPACE_ID = os.getenv("YOOX_WORKSPACE_ID", "YOUR_WORKSPACE_ID").strip()
+
+# 点飞/起飞目标。默认为空，必须在 .env 或命令行显式给出。
+TARGET_LATITUDE = _env_float("YOOX_TARGET_LATITUDE")
+TARGET_LONGITUDE = _env_float("YOOX_TARGET_LONGITUDE")
+TARGET_HEIGHT = _env_float("YOOX_TARGET_HEIGHT")
+TARGET_MAX_SPEED = _env_float("YOOX_TARGET_MAX_SPEED", 5.0)
+
+# 控制接口超时只限制客户端等待时间，不代表设备没有执行指令。
+HTTP_CONNECT_TIMEOUT = _env_float("YOOX_HTTP_CONNECT_TIMEOUT", 5.0) or 5.0
+HTTP_CONTROL_TIMEOUT = _env_float("YOOX_HTTP_CONTROL_TIMEOUT", 20.0) or 20.0
+POINT_FLIGHT_WAIT_SECONDS = _env_int("YOOX_POINT_FLIGHT_WAIT_SECONDS", 300)

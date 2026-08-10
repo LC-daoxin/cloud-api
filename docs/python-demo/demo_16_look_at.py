@@ -1,108 +1,78 @@
-"""
-demo_16_look_at.py -- 负载控制 Look At（云台对准指定 GPS 目标点）
+"""负载 Look At：抢占负载控制权后指向显式 WGS84 目标。"""
+from __future__ import annotations
 
-完整流程：
-  1. payload_authority_grab  抢夺负载控制权（Look At 的前置条件）
-     POST /control/api/v1/devices/{sn}/authority/payload  body={"payload_index": ...}
-  2. camera_look_at          让云台/相机对准目标经纬高
-     POST /control/api/v1/devices/{sn}/payload/commands
-     body={"cmd": "camera_look_at", "data": {payload_index, locked, latitude, longitude, height}}
+import argparse
 
-指令下行报文（服务端拼装后发往设备）：
-  Topic : thing/product/{gateway_sn}/services    Direction: down
-  Method: camera_look_at
-  Data  : { payload_index, locked, latitude, longitude, height }  # height 为椭球高
-
-  | 字段      | 说明                                   |
-  |-----------|----------------------------------------|
-  | payload_index | 相机负载索引，例如 53-0-0         |
-  | locked    | true=机身与云台一起转向，false=仅云台转动 |
-  | latitude  | 目标点纬度，-90~90，精度小数点后 6 位   |
-  | longitude | 目标点经度，-180~180，精度小数点后 6 位 |
-  | height    | 目标点高度（椭球高），2~10000 m         |
-
-【RC 网关注意】遥控器（REMOTER_CONTROL 域）把无人机作为子设备管理，服务端会自动
-补上 device_list 显式寻址无人机 SN，否则遥控器会静默丢弃指令、永不回复，
-云端表现为 211001「No message reply received.」超时。此逻辑已在 cloud-service
-的 payloadCommands 中按网关域自动分流，demo 无需关心。
-
-前提：无人机已在空中、负载在线，config.py 中的 PAYLOAD_INDEX 为实际相机枚举值。
-
-运行：
-    python3 demo_16_look_at.py                       # 使用脚本内默认目标点
-    python3 demo_16_look_at.py 22.5431 113.9213 50   # 纬度 经度 高度(米)
-"""
-import sys
-import requests
-from config import (BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG,
-                    DOCK_SN, PAYLOAD_INDEX)
-from demo_common import diagnose
-
-if DOCK_SN == "YOUR_DOCK_SN":
-    print("[✗] 请先在 config.py 中设置 DOCK_SN")
-    sys.exit(1)
-
-# ── 默认目标坐标（可用命令行参数覆盖）──
-TARGET_LATITUDE = 22.5431
-TARGET_LONGITUDE = 113.9213
-TARGET_HEIGHT = 50.0   # 椭球高，单位米
+from config import (
+    DOCK_SN,
+    PAYLOAD_INDEX,
+    TARGET_HEIGHT,
+    TARGET_LATITUDE,
+    TARGET_LONGITUDE,
+)
+from demo_common import (
+    DemoConfigError,
+    DemoError,
+    login,
+    print_error_and_hint,
+    require_config,
+    seize_payload_authority,
+    send_payload_command,
+)
 
 
-def get_token():
-    resp = requests.post(f"{BASE_URL}/manage/api/v1/login",
-                         json={"username": WEB_USERNAME, "password": WEB_PASSWORD, "flag": WEB_FLAG},
-                         timeout=10)
-    return resp.json()["data"]["access_token"]
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="YOOX camera_look_at Demo")
+    parser.add_argument("latitude", nargs="?", type=float, default=TARGET_LATITUDE)
+    parser.add_argument("longitude", nargs="?", type=float, default=TARGET_LONGITUDE)
+    parser.add_argument("height", nargs="?", type=float, default=TARGET_HEIGHT)
+    parser.add_argument(
+        "--locked",
+        action="store_true",
+        help="同时联动机身；默认 false，仅转云台，与当前 Web 控制台一致",
+    )
+    return parser
 
 
-def seize_payload_authority(token) -> bool:
-    """payload_authority_grab —— Look At / 变焦 / 拍录等负载指令的前置条件"""
-    url = f"{BASE_URL}/control/api/v1/devices/{DOCK_SN}/authority/payload"
-    resp = requests.post(url,
-                         headers={"x-auth-token": token},
-                         json={"payload_index": PAYLOAD_INDEX},
-                         timeout=15)
-    result = resp.json()
-    if result.get("code") == 0:
-        print(f"[✓] 已抢夺负载控制权 (payload_authority_grab) 负载={PAYLOAD_INDEX}")
-        return True
-    return diagnose(token, "抢夺负载控制权", result.get("message", str(result)))
+def main() -> int:
+    args = build_parser().parse_args()
+    require_config(YOOX_DOCK_SN=DOCK_SN, YOOX_PAYLOAD_INDEX=PAYLOAD_INDEX)
+    if args.latitude is None or args.longitude is None or args.height is None:
+        raise DemoConfigError(
+            "请传入 latitude longitude height，或配置 YOOX_TARGET_LATITUDE/LONGITUDE/HEIGHT"
+        )
+    if not (
+        -90 <= args.latitude <= 90
+        and -180 <= args.longitude <= 180
+        and not (args.latitude == 0 and args.longitude == 0)
+        and 2 <= args.height <= 10000
+    ):
+        raise DemoConfigError("Look At 目标需为非零有效经纬度，高度范围 2–10000 m")
 
-
-def camera_look_at(token, latitude: float, longitude: float, height: float) -> bool:
-    url = f"{BASE_URL}/control/api/v1/devices/{DOCK_SN}/payload/commands"
-    body = {
-        "cmd": "camera_look_at",
-        "data": {
+    token = login()
+    seize_payload_authority(token, PAYLOAD_INDEX)
+    print(
+        f"[*] camera_look_at -> ({args.latitude:.6f}, "
+        f"{args.longitude:.6f}, {args.height:.1f}m), locked={args.locked}"
+    )
+    send_payload_command(
+        token,
+        "camera_look_at",
+        {
             "payload_index": PAYLOAD_INDEX,
-            "locked": True,
-            "latitude": round(latitude, 6),
-            "longitude": round(longitude, 6),
-            "height": round(height, 1),
+            "locked": args.locked,
+            "latitude": round(args.latitude, 6),
+            "longitude": round(args.longitude, 6),
+            "height": round(args.height, 1),
         },
-    }
-    print(f"[*] 发送 camera_look_at → ({latitude}, {longitude}, {height} m)")
-    resp = requests.post(url,
-                         headers={"x-auth-token": token, "Content-Type": "application/json"},
-                         json=body,
-                         timeout=15)
-    result = resp.json()
-    ok = result.get("code") == 0
-    if ok:
-        print(f"[✓] {result.get('message', 'success')}")
-    else:
-        diagnose(token, "camera_look_at", result.get("message", str(result)), exit_on_error=False)
-    return ok
+    )
+    print("[✓] Look At 调用成功；实际云台方向以 OSD/画面为准")
+    return 0
 
 
 if __name__ == "__main__":
-    if len(sys.argv) >= 4:
-        TARGET_LATITUDE = float(sys.argv[1])
-        TARGET_LONGITUDE = float(sys.argv[2])
-        TARGET_HEIGHT = float(sys.argv[3])
-
-    print(f"[*] 目标设备: {DOCK_SN}  负载: {PAYLOAD_INDEX}")
-    token = get_token()
-    if not seize_payload_authority(token):
-        sys.exit(1)
-    camera_look_at(token, TARGET_LATITUDE, TARGET_LONGITUDE, TARGET_HEIGHT)
+    try:
+        raise SystemExit(main())
+    except DemoError as exc:
+        print_error_and_hint(exc)
+        raise SystemExit(1)

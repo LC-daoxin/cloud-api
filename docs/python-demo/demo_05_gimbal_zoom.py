@@ -1,77 +1,51 @@
-"""
-demo_05_gimbal_zoom.py -- 云台变焦（camera_focal_length_set）
+"""抢占负载控制权并设置相机变焦倍率。"""
+from __future__ import annotations
 
-变焦范围：2.0 ~ 200.0（数字变焦倍率）
-运行前确保：
-  1. 已在 config.py 填写正确的 DOCK_SN 和 PAYLOAD_INDEX
-  2. 无人机已上线且处于 MANUAL 模式
-  3. 云台处于 IDLE 状态
+from config import DOCK_SN, PAYLOAD_INDEX
+from demo_common import (
+    DemoConfigError,
+    DemoError,
+    login,
+    print_error_and_hint,
+    require_config,
+    seize_payload_authority,
+    send_payload_command,
+)
 
-运行：
-    python3 demo_05_gimbal_zoom.py
-"""
-import requests
-from config import BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG, DOCK_SN, PAYLOAD_INDEX
-from demo_common import diagnose
 
-if DOCK_SN == "YOUR_DOCK_SN":
-    import sys
-    print("[✗] 请先在 config.py 中设置 DOCK_SN，运行 demo_02_devices.py 可查看设备 SN")
-    sys.exit(1)
+ZOOM_FACTOR = 5.0
+CAMERA_TYPE = "zoom"  # zoom 或 ir
 
-ZOOM_FACTOR = 5.0   # ← 修改此值：2.0 ~ 200.0
-CAMERA_TYPE = "zoom"  # ← "zoom" 或 "ir"
 
-def get_token():
-    resp = requests.post(f"{BASE_URL}/manage/api/v1/login",
-                         json={"username": WEB_USERNAME, "password": WEB_PASSWORD, "flag": WEB_FLAG},
-                         timeout=10)
-    return resp.json()["data"]["access_token"]
+def main() -> int:
+    require_config(YOOX_DOCK_SN=DOCK_SN, YOOX_PAYLOAD_INDEX=PAYLOAD_INDEX)
+    if CAMERA_TYPE not in {"zoom", "ir"}:
+        raise DemoConfigError("CAMERA_TYPE 只能是 zoom 或 ir")
+    maximum = 160 if CAMERA_TYPE == "zoom" else 16
+    if not 1 <= float(ZOOM_FACTOR) <= maximum:
+        raise DemoConfigError(
+            f"CAMERA_TYPE={CAMERA_TYPE} 时 ZOOM_FACTOR 必须在 1.0–{maximum}.0"
+        )
 
-def seize_payload_authority(token):
-    """抢占负载控制权（必须先抢权才能控制相机）"""
-    url = f"{BASE_URL}/control/api/v1/devices/{DOCK_SN}/authority/payload"
-    resp = requests.post(url,
-                         headers={"x-auth-token": token},
-                         json={"payload_index": PAYLOAD_INDEX},
-                         timeout=10)
-    result = resp.json()
-    if result.get("code") == 0:
-        print("[✓] 已获取负载控制权")
-    else:
-        diagnose(token, "抢占负载控制权", result.get("message", str(result)))
-
-def zoom(token, zoom_factor: float):
-    """设置变焦倍率"""
-    url = f"{BASE_URL}/control/api/v1/devices/{DOCK_SN}/payload/commands"
-    body = {
-        "cmd": "camera_focal_length_set",
-        "data": {
+    token = login()
+    seize_payload_authority(token, PAYLOAD_INDEX)
+    print(f"[*] 设置 {CAMERA_TYPE} 变焦倍率为 {ZOOM_FACTOR}x")
+    send_payload_command(
+        token,
+        "camera_focal_length_set",
+        {
             "payload_index": PAYLOAD_INDEX,
-            "zoom_factor": zoom_factor,
-            "camera_type": CAMERA_TYPE
-        }
-    }
+            "zoom_factor": float(ZOOM_FACTOR),
+            "camera_type": CAMERA_TYPE,
+        },
+    )
+    print("[✓] 变焦指令调用成功；实际镜头状态以 OSD 上报为准")
+    return 0
 
-    print(f"[*] 发送变焦指令: zoom_factor={zoom_factor} camera_type={CAMERA_TYPE}")
-    resp = requests.post(url,
-                         headers={"x-auth-token": token, "Content-Type": "application/json"},
-                         json=body,
-                         timeout=15)
-    result = resp.json()
-
-    if result.get("code") == 0:
-        print(f"[✓] 变焦成功，当前倍率: {zoom_factor}x")
-    else:
-        diagnose(token, "变焦指令", result.get("message", str(result)), exit_on_error=False)
-
-    return result
 
 if __name__ == "__main__":
-    print(f"[*] 目标设备: {DOCK_SN}")
-    print(f"[*] 负载索引: {PAYLOAD_INDEX}")
-    print(f"[*] 目标焦距: {ZOOM_FACTOR}x")
-
-    token = get_token()
-    seize_payload_authority(token)
-    zoom(token, ZOOM_FACTOR)
+    try:
+        raise SystemExit(main())
+    except DemoError as exc:
+        print_error_and_hint(exc)
+        raise SystemExit(1)

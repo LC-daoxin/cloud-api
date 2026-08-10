@@ -9,14 +9,15 @@ demo_06_gimbal_pitch.py -- 云台控制（camera_aim 指点 + camera_screen_drag
 运行：
     python3 demo_06_gimbal_pitch.py
 """
-import sys
-import requests
-from config import BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG, DOCK_SN, PAYLOAD_INDEX
-from demo_common import diagnose
-
-if DOCK_SN == "YOUR_DOCK_SN":
-    print("[✗] 请先在 config.py 中设置 DOCK_SN，运行 demo_02_devices.py 可查看设备 SN")
-    sys.exit(1)
+from config import DOCK_SN, PAYLOAD_INDEX
+from demo_common import (
+    DemoError,
+    login,
+    print_error_and_hint,
+    require_config,
+    seize_payload_authority,
+    send_payload_command,
+)
 
 # gimbal_reset 模式名映射（对应 API 文档）
 RESET_MODES = {0: "回中", 1: "向下", 2: "偏航回中", 3: "向下45度"}
@@ -25,36 +26,12 @@ RESET_MODES = {0: "回中", 1: "向下", 2: "偏航回中", 3: "向下45度"}
 DEFAULT_DRAG_SPEED = 0.1
 
 
-def get_token():
-    resp = requests.post(f"{BASE_URL}/manage/api/v1/login",
-                         json={"username": WEB_USERNAME, "password": WEB_PASSWORD, "flag": WEB_FLAG},
-                         timeout=10)
-    result = resp.json()
-    if result.get("code") != 0:
-        print(f"[✗] 登录失败: {result.get('message', '')}\n    请检查 config.py 中的 WEB_USERNAME / WEB_PASSWORD")
-        sys.exit(1)
-    return result["data"]["access_token"]
-
-
-def seize_payload_authority(token):
-    url = f"{BASE_URL}/control/api/v1/devices/{DOCK_SN}/authority/payload"
-    resp = requests.post(url,
-                         headers={"x-auth-token": token},
-                         json={"payload_index": PAYLOAD_INDEX},
-                         timeout=10)
-    result = resp.json()
-    if result.get("code") != 0:
-        diagnose(token, "抢占负载控制权", result.get("message", ""))
-    print("[✓] 已获取负载控制权")
-
-
 def _payload_command(token, cmd: str, data: dict):
-    url = f"{BASE_URL}/control/api/v1/devices/{DOCK_SN}/payload/commands"
-    resp = requests.post(url,
-                         headers={"x-auth-token": token, "Content-Type": "application/json"},
-                         json={"cmd": cmd, "data": data},
-                         timeout=10)
-    return resp.json()
+    try:
+        return send_payload_command(token, cmd, data, timeout=10)
+    except DemoError as exc:
+        print_error_and_hint(exc)
+        return None
 
 
 def camera_aim(token, x: float, y: float, camera_type: str = "zoom", locked: bool = False):
@@ -87,21 +64,28 @@ def gimbal_reset(token, mode: int = 0):
 
 
 def _ok(result):
-    return result.get("code") == 0
+    return bool(result and result.get("code") == 0)
 
 
 def _print_result(label, result):
+    if result is None:
+        return
     mark = "✓" if _ok(result) else "✗"
     msg = result.get("message", "")
     print(f"  [{mark}] {label}: {msg}")
 
 
 if __name__ == "__main__":
-    print(f"[*] 目标设备: {DOCK_SN}")
-    print(f"[*] 负载索引: {PAYLOAD_INDEX}\n")
+    try:
+        require_config(YOOX_DOCK_SN=DOCK_SN, YOOX_PAYLOAD_INDEX=PAYLOAD_INDEX)
+        print(f"[*] 目标设备: {DOCK_SN}")
+        print(f"[*] 负载索引: {PAYLOAD_INDEX}\n")
 
-    token = get_token()
-    seize_payload_authority(token)
+        token = login()
+        seize_payload_authority(token, PAYLOAD_INDEX)
+    except DemoError as exc:
+        print_error_and_hint(exc)
+        raise SystemExit(1)
 
     print(f"""═══ 云台控制指令 ═══
 

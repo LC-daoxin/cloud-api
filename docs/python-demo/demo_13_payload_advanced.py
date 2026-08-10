@@ -17,41 +17,23 @@ Cloud-API 版已支持的指令（无需 YOOX）：
 注意：本 demo 针对 YOOX Cloud GCS 项目。
       如果当前运行的是原版 Cloud-API，标注 [YOOX] 的指令会返回 404 或方法未找到错误。
 """
-import sys
-import requests
-from config import BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG, DOCK_SN, PAYLOAD_INDEX
-
-
-def get_token():
-    resp = requests.post(f"{BASE_URL}/manage/api/v1/login",
-                         json={"username": WEB_USERNAME, "password": WEB_PASSWORD, "flag": WEB_FLAG},
-                         timeout=10)
-    return resp.json()["data"]["access_token"]
-
-
-def seize_payload_authority(token):
-    url = f"{BASE_URL}/control/api/v1/devices/{DOCK_SN}/authority/payload"
-    resp = requests.post(url, headers={"x-auth-token": token},
-                         json={"payload_index": PAYLOAD_INDEX}, timeout=10)
-    result = resp.json()
-    if result.get("code") != 0:
-        print(f"[✗] 抢占负载控制权失败: {result.get('message','')}")
-        sys.exit(1)
-    print("[✓] 已获取负载控制权")
+from config import DOCK_SN, PAYLOAD_INDEX
+from demo_common import (
+    DemoError,
+    login,
+    print_error_and_hint,
+    require_config,
+    seize_payload_authority,
+    send_payload_command,
+)
 
 
 def send_payload_cmd(token, cmd: str, extra: dict = None) -> dict:
-    url = f"{BASE_URL}/control/api/v1/devices/{DOCK_SN}/payload/commands"
     data = {"payload_index": PAYLOAD_INDEX}
     if extra:
         data.update(extra)
-    body = {"cmd": cmd, "data": data}
-    resp = requests.post(url,
-                         headers={"x-auth-token": token, "Content-Type": "application/json"},
-                         json=body, timeout=15)
-    result = resp.json()
-    ok = result.get("code") == 0
-    print(f"[{'✓' if ok else '✗'}] {cmd}: {result.get('message', '')}")
+    result = send_payload_command(token, cmd, data)
+    print(f"[✓] {cmd} 调用成功；实际负载状态以 OSD 为准")
     return result
 
 
@@ -118,16 +100,14 @@ def video_storage_set(token, lenses: list):
     })
 
 
-if __name__ == "__main__":
+def main() -> int:
+    require_config(YOOX_DOCK_SN=DOCK_SN, YOOX_PAYLOAD_INDEX=PAYLOAD_INDEX)
     print(f"[*] 目标设备: {DOCK_SN}")
     print(f"[*] 负载索引: {PAYLOAD_INDEX}")
-    if DOCK_SN == "YOUR_DOCK_SN":
-        print("[✗] 请先在 config.py 中设置 DOCK_SN")
-        sys.exit(1)
     print("[!] 注意：标注[YOOX]的指令需要 YOOX Cloud GCS 版本，原版 Cloud-API 不支持\n")
 
-    token = get_token()
-    seize_payload_authority(token)
+    token = login()
+    seize_payload_authority(token, PAYLOAD_INDEX)
 
     print("""高级负载控制菜单：
   1. [YOOX] 画面拖动 - 云台向上（pitch=-0.5）
@@ -145,32 +125,49 @@ if __name__ == "__main__":
 
     while True:
         cmd = input("选择操作: ").strip().upper()
-        if cmd == "Q":
-            break
-        elif cmd == "1":
-            camera_screen_drag(token, pitch_speed=-0.5, yaw_speed=0)
-        elif cmd == "2":
-            camera_screen_drag(token, pitch_speed=0.5, yaw_speed=0)
-        elif cmd == "3":
-            camera_screen_drag(token, pitch_speed=0, yaw_speed=-0.5)
-        elif cmd == "4":
-            camera_screen_drag(token, pitch_speed=0, yaw_speed=0.5)
-        elif cmd == "5":
-            camera_screen_drag(token, pitch_speed=0, yaw_speed=0)
-        elif cmd == "6":
-            camera_focal_length_drag(token, zoom_type=1)
-        elif cmd == "7":
-            camera_focal_length_drag(token, zoom_type=2)
-        elif cmd == "8":
-            camera_focal_length_drag(token, zoom_type=0)
-        elif cmd == "9":
-            lat = float(input("  纬度 (-90~90): "))
-            lon = float(input("  经度 (-180~180): "))
-            h   = float(input("  高度 (2~10000 米): "))
-            camera_look_at(token, lat, lon, h)
-        elif cmd == "A":
-            photo_storage_set(token, ["zoom", "wide"])
-        elif cmd == "B":
-            video_storage_set(token, ["zoom", "wide"])
-        else:
-            print("  未知操作")
+        try:
+            if cmd == "Q":
+                break
+            elif cmd == "1":
+                camera_screen_drag(token, pitch_speed=-0.5, yaw_speed=0)
+            elif cmd == "2":
+                camera_screen_drag(token, pitch_speed=0.5, yaw_speed=0)
+            elif cmd == "3":
+                camera_screen_drag(token, pitch_speed=0, yaw_speed=-0.5)
+            elif cmd == "4":
+                camera_screen_drag(token, pitch_speed=0, yaw_speed=0.5)
+            elif cmd == "5":
+                camera_screen_drag(token, pitch_speed=0, yaw_speed=0)
+            elif cmd == "6":
+                camera_focal_length_drag(token, zoom_type=1)
+            elif cmd == "7":
+                camera_focal_length_drag(token, zoom_type=2)
+            elif cmd == "8":
+                camera_focal_length_drag(token, zoom_type=0)
+            elif cmd == "9":
+                lat = float(input("  纬度 (-90~90): "))
+                lon = float(input("  经度 (-180~180): "))
+                height = float(input("  高度 (2~10000 米): "))
+                if not (-90 <= lat <= 90 and -180 <= lon <= 180 and 2 <= height <= 10000):
+                    print("  坐标/高度超出允许范围")
+                    continue
+                camera_look_at(token, lat, lon, height)
+            elif cmd == "A":
+                photo_storage_set(token, ["zoom", "wide"])
+            elif cmd == "B":
+                video_storage_set(token, ["zoom", "wide"])
+            else:
+                print("  未知操作")
+        except ValueError:
+            print("  坐标必须是数字")
+        except DemoError as exc:
+            print_error_and_hint(exc)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        raise SystemExit(main())
+    except DemoError as exc:
+        print_error_and_hint(exc)
+        raise SystemExit(1)

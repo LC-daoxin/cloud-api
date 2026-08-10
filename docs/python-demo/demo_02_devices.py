@@ -4,29 +4,24 @@ demo_02_devices.py -- 查询在线设备列表，获取遥控器/无人机 SN �
 运行：
     python3 demo_02_devices.py
 
-输出结果中把 dock_sn / drone_sn / payload_index 填入 config.py。
+输出结果中的 SN / payload_index 用于填写本机 ``.env``。
 """
-import requests
-import json
-from config import BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG, WORKSPACE_ID, SERVER_IP
-from demo_common import check_online_via_redis
-
-
-def get_token():
-    resp = requests.post(f"{BASE_URL}/manage/api/v1/login",
-                         json={"username": WEB_USERNAME, "password": WEB_PASSWORD, "flag": WEB_FLAG},
-                         timeout=10)
-    return resp.json()["data"]["access_token"]
+from config import WORKSPACE_ID
+from demo_common import DemoError, api_call, login, print_error_and_hint, require_config
 
 
 def get_devices(token):
-    headers = {"x-auth-token": token}
     domain_map = {0: "无人机", 1: "负载", 2: "遥控器", 3: "机巢"}
 
     # 设备拓扑
-    url = f"{BASE_URL}/manage/api/v1/devices/{WORKSPACE_ID}/devices"
-    resp = requests.get(url, headers=headers, timeout=10)
-    devices = resp.json().get("data", [])
+    result = api_call(
+        token,
+        "GET",
+        f"/manage/api/v1/devices/{WORKSPACE_ID}/devices",
+        action="查询设备列表",
+        timeout=10,
+    )
+    devices = result.get("data") or []
 
     print(f"\n[✓] 设备列表 (workspace: {WORKSPACE_ID})")
     print(f"{'SN':<32} {'类型':<8} {'子设备SN':<24} {'在线'}")
@@ -38,9 +33,9 @@ def get_devices(token):
         sn = d.get("device_sn", "")
         domain = domain_map.get(d.get("domain"), str(d.get("domain")))
         child = d.get("child_device_sn", "") or ""
-        # 真正在线状态：查 Redis online:{sn} key（应用侧 60 秒无心跳刷新即过期）
-        is_online = check_online_via_redis(sn)
-        online_str = "✓ 在线" if is_online else "○ 离线"
+        # 服务端 DTO.status 来自设备在线缓存；Demo 不依赖部署机上的 Docker/Redis。
+        status = d.get("status")
+        online_str = "✓ 在线" if status is True else "○ 离线" if status is False else "? 未知"
         print(f"{sn:<32} {domain:<8} {child:<24} {online_str}")
 
         # 遥控器/机巢的 child_device_sn 就是无人机 SN
@@ -57,29 +52,33 @@ def get_devices(token):
         print("  (无设备)")
         return
 
-    print(f"\n[!] 请将以下值填入 config.py：")
+    print("\n[!] 请将以下值填入 .env（不要提交 .env）：")
     if dock_sn:
-        print(f"    DOCK_SN = \"{dock_sn}\"")
+        print(f"    YOOX_DOCK_SN={dock_sn}")
     if drone_sn:
-        print(f"    DRONE_SN = \"{drone_sn}\"")
+        print(f"    YOOX_DRONE_SN={drone_sn}")
     else:
-        print(f"    DRONE_SN = \"(暂无子设备，设备上线后自动获取)\"")
+        print("    # YOOX_DRONE_SN=（暂无子设备，设备上线后再填写）")
 
     # 检查是否有设备在线
-    any_online = any(check_online_via_redis(d.get("device_sn", "")) for d in devices)
+    any_online = any(d.get("status") is True for d in devices)
     if not any_online:
-        print(f"\n[!] 当前无设备在线（Redis 无在线 key）")
-        print(f"    设备需要通过 MQTT 发送 status/update_topo 才能上线")
-        print(f"    请在 Pilot App 中重新连接云服务")
-        print(f"    验证命令: docker exec uav-redis redis-cli keys '*online*'")
+        print("\n[!] 服务端设备列表中没有在线设备")
+        print("    设备需要通过 MQTT 发送 status/update_topo 才能上线")
+        print("    请在 Pilot App 中重新连接云服务")
 
     # 直播能力
-    live_url = f"{BASE_URL}/manage/api/v1/live/capacity"
-    live_resp = requests.get(live_url, headers=headers, timeout=10)
-    live_data = live_resp.json().get("data", [])
+    live_result = api_call(
+        token,
+        "GET",
+        "/manage/api/v1/live/capacity",
+        action="查询直播能力",
+        timeout=10,
+    )
+    live_data = live_result.get("data") or []
 
     if live_data:
-        print(f"\n[✓] 在线设备直播能力（可获取 payload_index）")
+        print("\n[✓] 在线设备直播能力（可获取 payload_index）")
         for dev in live_data:
             print(f"\n  设备 SN: {dev.get('sn')}")
             # 兼容两种字段格式：cameras_list（Cloud-API 实际返回）/ camerasList（旧格式）
@@ -93,15 +92,19 @@ def get_devices(token):
                 lens = [v.get("type") for v in videos if v.get("type")]
                 lens_str = f" 镜头: {','.join(lens)}" if lens else ""
                 print(f"    摄像头: {index} | {name}{lens_str}")
-                print(f"    -> 填入 config.py PAYLOAD_INDEX = \"{index}\"")
+                print(f"    -> .env: YOOX_PAYLOAD_INDEX={index}")
     else:
-        print(f"\n[!] 直播能力为空（设备未上报 capability）")
-        print(f"    PAYLOAD_INDEX 只能从 OSD 数据获取：")
-        print(f"    1. 运行 demo_03_websocket_osd.py")
-        print(f"    2. 查看推送的 OSD 消息中 payloads[].payload_index 字段")
+        print("\n[!] 直播能力为空（设备未上报 capability）")
+        print("    PAYLOAD_INDEX 只能从 OSD 数据获取：")
+        print("    1. 运行 demo_03_websocket_osd.py")
+        print("    2. 查看推送的 OSD 消息中 payloads[].payload_index 字段")
         print("    3. 格式为 'domain-type-subtype'，如 '1-10052-0'")
 
 
 if __name__ == "__main__":
-    token = get_token()
-    get_devices(token)
+    try:
+        require_config(YOOX_WORKSPACE_ID=WORKSPACE_ID)
+        get_devices(login())
+    except DemoError as exc:
+        print_error_and_hint(exc)
+        raise SystemExit(1)

@@ -13,18 +13,11 @@ demo_03_websocket_osd.py -- 实时接收飞机遥测数据（OSD）
     python3 demo_03_websocket_osd.py
 """
 import json
-import requests
 import websocket
 import threading
 import time
-from config import BASE_URL, SERVER_IP, SERVER_PORT, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG
-
-
-def get_token():
-    resp = requests.post(f"{BASE_URL}/manage/api/v1/login",
-                         json={"username": WEB_USERNAME, "password": WEB_PASSWORD, "flag": WEB_FLAG},
-                         timeout=10)
-    return resp.json()["data"]["access_token"]
+from config import WS_URL
+from demo_common import DemoError, login, print_error_and_hint
 
 
 last_msg_time = [0]
@@ -88,7 +81,7 @@ def on_message(ws, message):
         elif biz_code in ("takeoff_to_point_progress", "flighttask_progress"):
             print(f"[进度] {biz_code}: result={data.get('result')} {data.get('message', '')}")
 
-        elif biz_code == "target_detect_result":
+        elif biz_code in {"target_detect_result_report", "target_detect_result"}:
             print(f"[目标识别] {json.dumps(data, ensure_ascii=False)}")
 
         elif biz_code == "drc_status_notify":
@@ -103,7 +96,7 @@ def on_message(ws, message):
         else:
             print(f"[消息#{msg_count[0]}] biz_code={biz_code}: {json.dumps(data, ensure_ascii=False)}")
 
-    except Exception as e:
+    except Exception:
         print(f"[原始] {message}")
 
 
@@ -123,32 +116,33 @@ def on_open(ws):
         if msg_count[0] == 0:
             print("\n[!] 12 秒内未收到任何推送，可能原因：")
             print("    - 设备未完成上线握手（未发送 update_topo）")
-            print("    - 设备已离线（Redis 无在线 key）")
-            print("    验证: docker exec uav-redis redis-cli keys '*online*'\n")
+            print("    - 设备已离线，或当前工作空间没有在线设备")
+            print("    验证: 运行 demo_02_devices.py 查看服务端设备状态\n")
     threading.Thread(target=_watchdog, daemon=True).start()
 
 
 if __name__ == "__main__":
-    token = get_token()
-    ws_url = f"ws://{SERVER_IP}:{SERVER_PORT}/api/v1/ws?x-auth-token={token}"
-
-    print(f"[*] 连接 WebSocket: {ws_url[:60]}...")
-
-    ws = websocket.WebSocketApp(
-        ws_url,
-        on_open=on_open,
-        on_message=on_message,
-        on_error=on_error,
-        on_close=on_close
-    )
-
-    wst = threading.Thread(target=ws.run_forever)
-    wst.daemon = True
-    wst.start()
-
     try:
-        while True:
-            time.sleep(1)
-    except KeyboardInterrupt:
-        print("\n[*] 用户中断，关闭连接")
-        ws.close()
+        token = login()
+        separator = "&" if "?" in WS_URL else "?"
+        ws_url = f"{WS_URL}{separator}x-auth-token={token}"
+        print(f"[*] 连接 WebSocket: {WS_URL}（token 不回显）")
+
+        ws = websocket.WebSocketApp(
+            ws_url,
+            on_open=on_open,
+            on_message=on_message,
+            on_error=on_error,
+            on_close=on_close
+        )
+        wst = threading.Thread(target=ws.run_forever, daemon=True)
+        wst.start()
+        try:
+            while True:
+                time.sleep(1)
+        except KeyboardInterrupt:
+            print("\n[*] 用户中断，关闭连接")
+            ws.close()
+    except DemoError as exc:
+        print_error_and_hint(exc)
+        raise SystemExit(1)

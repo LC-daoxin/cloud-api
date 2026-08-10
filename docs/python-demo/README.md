@@ -1,701 +1,220 @@
 # Python Demo 使用指南
 
-本目录包含一套面向开发者和测试人员的独立 Python 脚本，用于验证云平台 API、演示设备控制能力。每个文件均可单独运行，无需了解项目内部结构。
+本目录用独立 Python 脚本演示 YOOX Cloud GCS 的设备查询、遥测、负载、直播、DRC、点飞和航线任务接口。飞行类 Demo 以当前项目的真实 REST 封装为准：服务端负责 MQTT 指令下发、RC 子设备寻址和设备回复，脚本负责安全确认、状态恢复与错误说明。
 
----
+## 1. 准备环境
 
-## 环境准备
-
-### 方法一：一键运行（推荐）
-
-使用 `run.sh` 脚本，**首次运行时自动创建虚拟环境并安装依赖**，后续无需任何操作：
+推荐使用一键脚本。它会创建隔离的 `.venv`、安装声明的依赖并载入本机 `.env`：
 
 ```bash
 cd docs/python-demo
-chmod +x run.sh          # 首次执行前赋权
+cp .env.example .env
+chmod +x run.sh
 ./run.sh demo_01_login.py
 ```
 
-### 方法二：手动虚拟环境
+`.env`、`.venv` 和 `__pycache__` 已被 Git 忽略。不要提交真实密码、token、设备 SN、工作空间 ID、IP 或飞行坐标。
+
+也可以手动运行：
 
 ```bash
-cd docs/python-demo
-
-# 创建虚拟环境
 python3 -m venv .venv
-
-# 激活（每次新开终端都需要执行）
 source .venv/bin/activate
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 运行 demo
-python3 demo_01_login.py
+python -m pip install -r requirements.txt
+set -a; source .env; set +a
+python demo_02_devices.py
 ```
 
-> **不要用 `pip3 install -r requirements.txt` 直接安装**。macOS Homebrew 管理的 Python 是隔离环境，全局安装会报 `externally-managed-environment` 错误，需要虚拟环境隔离。
+不要向 Homebrew/系统 Python 全局安装依赖；macOS 可能报 `externally-managed-environment`。
 
-### 依赖说明
+## 2. 配置 `.env`
 
-| 包 | 用途 |
-|---|---|
-| `requests` | HTTP API 调用（所有 demo） |
-| `websocket-client` | WebSocket 实时推送（demo_03） |
-| `paho-mqtt` | MQTT 订阅/下发（demo_04 / demo_12 / demo_14 / demo_15） |
+至少填写 Web 登录和工作空间：
 
----
-
-## 第一步：修改配置
-
-**运行任何 demo 前，先编辑 `config.py`**，填入你的服务器地址和设备信息：
-
-```python
-# config.py 关键字段
-
-SERVER_IP = "172.20.10.8"   # ← 改为你的服务器 IP
-
-DOCK_SN    = "YOUR_DOCK_SN"   # ← 运行 demo_02 后填入
-DRONE_SN   = "YOUR_DRONE_SN"  # ← 运行 demo_02 后填入
-PAYLOAD_INDEX = "0-0-0"       # ← 运行 demo_02 后填入
+```dotenv
+YOOX_SERVER_IP=127.0.0.1
+YOOX_SERVER_PORT=9000
+YOOX_WEB_USERNAME=admin
+YOOX_WEB_PASSWORD=change_me
+YOOX_WORKSPACE_ID=YOUR_WORKSPACE_ID
 ```
 
----
+先运行 `demo_02_devices.py`，再把服务端返回的值写入 `.env`：
 
-## Demo 文件说明
-
-### `demo_01_login.py` —— 登录验证
-
-验证服务器是否正常，打印 token 和 MQTT 配置信息。
-
-```bash
-./run.sh demo_01_login.py
+```dotenv
+YOOX_DOCK_SN=YOUR_DOCK_SN
+YOOX_DRONE_SN=YOUR_DRONE_SN
+YOOX_PAYLOAD_INDEX=YOUR_PAYLOAD_INDEX
 ```
 
-**预期输出：**
-```
-[✓] 登录成功
-    token        : eyJ0eXAi...
-    workspace_id : e3dea0f5-...
-    mqtt_addr    : tcp://172.20.10.8:1883
+点飞、一键起飞和 Look At 不再内置真实或示例坐标，必须显式配置或通过命令行传入：
 
-[!] Pilot/App 端 MQTT 配置：
-    MQTT 地址    : tcp://172.20.10.8:1883
-    MQTT 账号    : admin
-    MQTT 密码    : admin
+```dotenv
+YOOX_TARGET_LATITUDE=
+YOOX_TARGET_LONGITUDE=
+YOOX_TARGET_HEIGHT=
+YOOX_TARGET_MAX_SPEED=5
 ```
 
----
+反向代理/TLS 场景可设置完整的 `YOOX_BASE_URL` 和 `YOOX_WS_URL`。MQTT、RTSP、超时等完整配置见 [.env.example](./.env.example)。`config.py` 只读取环境变量，不应写入部署信息或凭证。
 
-### `demo_02_devices.py` —— 查询设备列表
+设备在线状态来自 `/manage/api/v1/devices/{workspace}/devices` 的 `status`，Demo 不要求能访问部署机的 Docker 或 Redis。
 
-列出当前工作空间中所有设备的 SN、昵称、类型和在线状态。**运行此 demo 获取 DOCK_SN 和 PAYLOAD_INDEX，填入 `config.py`**。
+## 3. Demo 索引
 
-```bash
-./run.sh demo_02_devices.py
-```
-
-**预期输出：**
-```
-[✓] 设备列表 (workspace: ...)
-SN                类型   子设备SN              在线
-TH7926043417      遥控器 1748FEV3HMP925511143  ✓
-
-[!] 请将以下值填入 config.py：
-    DOCK_SN = "TH7926043417"
-    DRONE_SN = "1748FEV3HMP925511143"
-
-[!] 直播能力为空（设备未上报 capability）
-    PAYLOAD_INDEX 只能从 OSD 数据获取：
-    1. 运行 demo_03_websocket_osd.py
-    2. 查看推送的 OSD 消息中 payloads[].payload_index 字段
-    3. 格式为 "domain-type-subtype"，如 "1-10052-0"
-```
-
----
-
-### `demo_03_websocket_osd.py` -- 实时遥测数据监听
-
-订阅 WebSocket，实时打印飞机位置、高度、电量、速度等遥测数据，以及设备上下线事件。
-
-```bash
-./run.sh demo_03_websocket_osd.py
-```
-
-**实时输出示例：**
-```
-[✓] WebSocket 已连接，等待推送数据...
-
-[OSD-无人机] lat=22.543100 lon=113.921300 h=50.0m spd=5.0m/s bat=85% mode=MANUAL
-[OSD-遥控器] mode=IDLE
-[事件] 设备上线: {...}
-[进度] fly_to_point_progress: {"status": "running", "progress": 60}
-[!!] Joystick 已失效: reason=4 遥控器夺权（如 B 控触发返航）
-     drone_control 不再生效，手动操控不可用
-```
-
-按 `Ctrl+C` 退出。
-
----
-
-### `demo_04_mqtt_osd.py` -- MQTT 原始 OSD 数据监听
-
-通过 MQTT 直接订阅设备 OSD 原始报文，比 demo_03（WebSocket）获取的数据更完整。
-
-```bash
-./run.sh demo_04_mqtt_osd.py
-```
-
-按 `Ctrl+C` 退出。
-
----
-
-### `demo_05_gimbal_zoom.py` -- 云台变焦
-
-设置相机变焦倍率（2.0 ～ 200.0）。
-
-**前提条件：**
-- `config.py` 中已填入 `DOCK_SN` 和 `PAYLOAD_INDEX`
-- 无人机已上线，相机处于 IDLE 状态
-
-**修改变焦倍率**（在文件顶部）：
-
-```python
-ZOOM_FACTOR = 5.0   # 改为目标倍率，范围 2.0 ~ 200.0
-```
-
-```bash
-./run.sh demo_05_gimbal_zoom.py
-```
-
-**预期输出：**
-```
-[✓] 已获取负载控制权
-[✓] 变焦成功，当前倍率: 5.0x
-```
-
----
-
-### `demo_06_gimbal_pitch.py` -- 云台方向控制（交互式）
-
-`camera_aim` 是**屏幕坐标指点**接口（不是连续转速控制）：
-- `x/y` 为 0.0~1.0 的归一化屏幕坐标，`y=0.0` 指向画面上方（仰角），`y=1.0` 指向画面下方（俯角）
-- 同时支持 `gimbal_reset` 直接复位到预设角度
-
-```bash
-./run.sh demo_06_gimbal_pitch.py
-```
-
-**交互示例：**
-```
-云台控制指令：
-  up      → 指向上方（y=0.0 画面上方）
-  down    → 指向下方（y=1.0 画面下方）
-  left    → 指向左方（x=0.0 画面左边）
-  right   → 指向右方（x=1.0 画面右边）
-  center  → 指向画面中心（x=0.5, y=0.5）
-  horizon → 云台居中（gimbal_reset mode=0）
-  down90  → 云台垂直下射（gimbal_reset mode=1）
-
-输入指令: down
-  [✓] 指向下方
-```
-
-| 指令 | 效果 | 接口参数 |
+| 文件 | 功能 | 必需配置 |
 |---|---|---|
-| `up` | 仰角向上 | x=0.5, y=0.0 |
-| `down` | 俯角向下 | x=0.5, y=1.0 |
-| `left` | 向左偏转 | x=0.0, y=0.5 |
-| `right` | 向右偏转 | x=1.0, y=0.5 |
-| `center` | 水平居中 | x=0.5, y=0.5 |
-| `horizon` | 云台归位 | gimbal_reset mode=0 |
-| `down90` | 垂直下射 | gimbal_reset mode=1 |
+| `demo_01_login.py` | 验证 Web 登录；配置 Pilot 密码时也验证 Pilot 登录 | Web 账号；Pilot 可选 |
+| `demo_02_devices.py` | 查询网关、飞机、在线状态和 `payload_index` | workspace |
+| `demo_03_websocket_osd.py` | WebSocket 遥测、上下线、点飞/航线/DRC 事件 | Web 账号 |
+| `demo_04_mqtt_osd.py` | MQTT 原始 OSD | MQTT |
+| `demo_05_gimbal_zoom.py` | 设置变焦倍率 | dock、payload |
+| `demo_06_gimbal_pitch.py` | `camera_aim`、拖动和云台复位 | dock、payload |
+| `demo_07_camera.py` | 拍照、开始/停止录像 | dock、payload |
+| `demo_08_fly_to_point.py` | 指点飞行、状态查询、安全停止 | dock、目标坐标 |
+| `demo_09_dock_control.py` | 机巢调试、一键返航、取消返航 | dock |
+| `demo_10_takeoff_to_point.py` | 一键起飞、任务身份恢复、终态等待 | dock、目标坐标 |
+| `demo_11_livestream.py` | 开始/停止直播、标清/高清、切镜头、无首帧恢复 | MQTT、RTSP |
+| `demo_12_drc.py` | DRC 专用 MQTT、心跳、摇杆和应急指令 | dock、workspace |
+| `demo_13_payload_advanced.py` | YOOX 扩展负载指令 | dock、payload |
+| `demo_14_target_detection.py` | 开启/关闭目标识别 | dock |
+| `demo_15_emergency.py` | 返航/取消返航及 DRC 应急处置 | dock；DRC 另需 workspace |
+| `demo_16_look_at.py` | GPS Look At | dock、payload、目标坐标 |
+| `demo_17_wayline.py` | 航线下发执行、进度、暂停、继续、取消 | dock、workspace、KMZ |
 
----
+## 4. 飞行控制流程
 
-### `demo_07_camera.py` -- 相机控制
+### 4.1 指点飞行与停止
 
-**拍照：**
-```bash
-./run.sh demo_07_camera.py photo
-```
-
-**开始录像：**
-```bash
-./run.sh demo_07_camera.py rec_start
-```
-
-**停止录像：**
-```bash
-./run.sh demo_07_camera.py rec_stop
-```
-
-**执行流程：**
-1. 自动抢占负载控制权
-2. 切换相机模式（拍照→模式0，录像→模式1）
-3. 发送对应指令
-
----
-
-### `demo_08_fly_to_point.py` -- 飞向目标坐标（飞行中）
-
-**前提：无人机已在空中，处于 MANUAL 模式。**
-
-修改文件顶部的目标坐标：
-
-```python
-TARGET_LATITUDE  = 22.5431    # 目标纬度
-TARGET_LONGITUDE = 113.9213   # 目标经度
-TARGET_HEIGHT    = 50.0       # 目标高度（米）
-MAX_SPEED        = 5          # 最大速度 1~15 m/s
-```
+前提是飞机在线、已在空中且为 `MANUAL` 模式。`max_speed` 在服务端模型中是整数，必须为 1–15 m/s。
 
 ```bash
-./run.sh demo_08_fly_to_point.py
+# 目标经纬度、高度和速度从本机 .env 读取
+./run.sh demo_08_fly_to_point.py go
+
+./run.sh demo_08_fly_to_point.py status
+./run.sh demo_08_fly_to_point.py stop
+./run.sh demo_08_fly_to_point.py auth
 ```
 
-脚本按三步执行：
+`go` 的真实顺序：
 
-1. **抢夺飞行控制权** `flight_authority_grab`
-2. **下发飞行指令** `POST .../jobs/fly-to-point`
-3. **订阅进度** 直到任务进入终态
+1. 查询 `GET /control/api/v1/devices/{sn}/jobs/point-flight/status`，发现活动或待确认任务时拒绝重复下发。
+2. 显式调用 `POST .../{sn}/authority/flight` 抢占飞行控制权。
+3. 只调用一次 `POST .../{sn}/jobs/fly-to-point`。
+4. 从状态接口恢复服务端生成的 `fly_to_id`，只接受同一 ID 的进度。
+5. 旁路展示 MQTT `fly_to_point_progress`，最终结果以匹配任务 ID 的 HTTP 状态为准。
 
-**输出示例：**
-```
-[✓] 已抢夺飞行控制权 (flight_authority_grab)
-[✓] 已订阅 thing/product/TH7926043417/events
-[*] 飞向坐标: lat=22.5431, lon=113.9213, h=50.0m, 速度=5m/s
-[✓] 飞向目标点指令已下发
+`stop` 只允许停止活动的 `kind=flyto` 任务。它会再次确认控制权，再调用 `DELETE .../{sn}/jobs/fly-to-point`。停止请求超时后先查询状态；只有确认仍在 FlyTo 时，才由操作者决定是否再次运行 `stop`。
 
-[轨迹] 规划航点 4 个
-    #0 lat=22.5431 lon=113.9213 h=50.0
-    #1 lat=22.544 lon=113.922 h=50.0
-    ... 其余 1 个已省略
-[飞行中] 航点#0  剩余 812.4 m  预计 163.5 s
-[飞行中] 航点#1  剩余 204.1 m  预计 41.0 s
+常见点飞状态：
 
-[✓] 执行成功，已飞抵目标点  result=0  fly_to_id=abc-123
-```
-
-#### 飞行控制权抢夺 `flight_authority_grab`
-
-飞控类指令（fly-to-point、takeoff-to-point 等）的**前置条件**。没有控制权时指令会被设备拒绝。
-
-| 项 | 值 |
+| 状态 | 含义 |
 |---|---|
-| HTTP | `POST /control/api/v1/devices/{sn}/authority/flight`（无请求体） |
-| 下发 Topic | `thing/product/{gateway_sn}/services` |
-| Method | `flight_authority_grab`，`data` 为 `{}` |
-| 回复 Topic | `thing/product/{gateway_sn}/services_reply` |
-| 回复 Data | `{ "result": int }`，非 0 代表错误 |
+| `command_pending` / `command_accepted` | 正在发送 / 设备已受理 |
+| `command_unknown` | 设备回复丢失，结果待确认；禁止重复 `go` |
+| `wayline_progress` | 飞行中 |
+| `wayline_ok` / `wayline_failed` | 到达 / 失败 |
+| `cancel_requested` / `cancel_unknown` | 正在取消 / 取消结果待确认 |
+| `cancel_confirmed` / `wayline_cancel` | 停止已确认 / 设备上报取消 |
 
-脚本菜单里的 `auth` 选项可单独抢权，不下发飞行指令。
+按 `Ctrl+C` 只会停止本地监听，不会停止飞机；需要停止 FlyTo 时另行运行 `stop`。
 
-> 负载控制权是另一套接口 `POST .../authority/payload`（需要 `payload_index`），见 demo_05/07/13。
+### 4.2 一键起飞
 
-#### 执行进度 `fly_to_point_progress`
+前提是飞机在地面、在线且为 `IDLE`。通常应把目标经纬度设为飞机当前有效 GPS 坐标，只改变相对高度：
 
-| 项 | 值 |
+```bash
+# 目标经纬度、高度和速度从本机 .env 读取
+./run.sh demo_10_takeoff_to_point.py go
+./run.sh demo_10_takeoff_to_point.py status
+```
+
+请求体与当前 Web 控制台一致，只包含 `target_longitude`、`target_latitude`、`target_height` 和 `max_speed`。服务端统一补充安全起飞高度、返航高度和失联返航动作，并在 RC 网关场景加入 `device_list`。
+
+脚本在 HTTP 成功或超时后都通过 point-flight 状态恢复 `flight_id`。如果暂时不能恢复，脚本会退出并要求观察 OSD，绝不会自动重复起飞。
+
+### 4.3 一键返航与取消返航
+
+可在 `demo_09_dock_control.py` 或 `demo_15_emergency.py` 使用：
+
+```text
+POST /control/api/v1/devices/{sn}/authority/flight
+POST /control/api/v1/devices/{sn}/jobs/return_home
+POST /control/api/v1/devices/{sn}/jobs/return_home_cancel
+```
+
+当前服务端也会在返航/取消返航内部确认控制权，并为 RC 网关显式寻址子设备；Demo 仍先显式抢权，以便在改变航迹前得到清晰的错误。HTTP `code=0` 只代表设备接受调用，不代表已经返航、悬停或落地，必须继续观察 OSD 和现场。
+
+取消返航会使飞机悬停，脚本要求 `YES` 二次确认。若请求超时，先确认 `mode_code` 和现场状态，不要立即重复发送。
+
+### 4.4 航线下发、暂停、继续和取消
+
+先在 Web 控制台上传可用 KMZ，再运行：
+
+```bash
+./run.sh demo_17_wayline.py
+```
+
+| 菜单动作 | REST | 设备方法 |
+|---|---|---|
+| 下发并立即执行 | `POST .../flight-tasks` | `flighttask_prepare` + `flighttask_execute` |
+| 暂停执行中任务 | `PUT .../jobs/{job_id}`，`status=0` | `flighttask_pause` |
+| 继续已暂停任务 | `PUT .../jobs/{job_id}`，`status=1` | `flighttask_recovery` |
+| 取消任务 | `DELETE .../jobs?job_id=...` | `flighttask_undo` |
+
+状态约束：执行中 `2` 可暂停；已暂停 `6` 可继续；待执行 `1`、执行中 `2`、已暂停 `6` 均可取消；成功 `3`、失败 `5` 不可取消。已取消 `4` 可重复调用取消接口做幂等本地收敛，不会再次下发 `flighttask_undo`。脚本在每次动作前重新读取任务，避免使用过期列表。
+
+创建接口不返回 `job_id`，脚本使用唯一任务名从列表恢复身份。暂停、继续、取消超时后也只刷新状态，不自动重发。MQTT `flighttask_progress` 会打印 `bid/job_id`、状态、步骤、百分比、航点和 result；REST 列表仍是下一次操作前的依据。
+
+## 5. 直播与 DRC
+
+`demo_11_livestream.py` 默认 `VIDEO_QUALITY=2`（标清），3 为高清。设备发布凭证由服务端配置，Demo 默认不传自定义 `url`，以便后端复用已有 MediaMTX publisher。开始直播返回成功不等于已有媒体帧；脚本使用不含发布凭据的 RTSP 播放路径做 `ffprobe` 探测，错误输出会脱敏。无论探测结果如何，脚本都不会在开始前自动停止现有 publisher；只有设备明确返回“直播已开始”、MediaMTX 又确认无媒体时，才会要求操作者输入 `YES` 后执行一次停止再开始。未安装 `ffprobe` 时状态是“无法探测”而不是“无流”。菜单 6 只对可安全切回的 `normal/wide/zoom/ir` 镜头执行临时切换恢复，`thermal` 等不支持类型会在任何镜头切换前终止。
+
+DRC 必须使用 `/drc/connect` 返回的专用 Broker 凭证和 `/drc/enter` 返回的 pub/sub ACL，不能把 DRC 指令直接发到普通 MQTT 连接。`demo_12` 和 `demo_15` 会等待 MQTT `CONNACK` 与订阅 `SUBACK`，随后立即发送心跳和连续两帧全零 `drone_control` 探针（`seq=0→1`）。只有当前 DRC 会话、当前 `drc/up` Topic、短时窗内的两帧回包都带显式 `result=0` 且 `output.seq` 依次匹配时才解锁非零摇杆；若回包携带 `tid/bid`，还必须匹配对应请求 ID。重连会重新锁定并重新握手，迟到、乱序、缺少 `seq` 或结果不明的 ACK 均不会解锁。这同时规避了部分 RC 固件不回显 `heart_beat` 导致“第一次进入 DRC 无心跳/无法控制”的问题。
+脚本会订阅 ACL 中全部 `sub` Topic，其中选择与控制 `drc/down` 对应的 `drc/up`，并直接接收紧急/强制降落的 `services_reply`。
+
+`seq=0→1` 只是首轮全零向量的序号。若 ACK 丢失或设备拒绝，设备可能已消费旧帧，因此重试必须让同一零向量的 `seq` 继续递增，不能回放 `0→1`；只有 `x/y/h/w` 实际变化时才从 0 重新计数。
+
+退出或异常时脚本先按当前向量序号规则发布最终零杆量并有界等待交给 MQTT 传输层，再断开 MQTT，最后使用同一 `client_id` 调用 `/drc/exit`。如果 enter/exit 超时，结果仍可能已经生效，应检查服务端会话与飞机状态，不要快速创建多个 DRC 会话。
+
+## 6. 错误与恢复
+
+所有 HTTP Demo 使用 `demo_common.py` 的统一调用层，不会对动作请求配置自动重试。
+
+| 错误/现象 | 含义与处理 |
 |---|---|
-| Topic | `thing/product/{gateway_sn}/events` |
-| Direction | up（机 → 云） |
-| Method | `fly_to_point_progress` |
+| `Connection refused` | 服务地址错误或服务未启动；检查 `.env` 中 URL/IP/端口 |
+| HTTP 401/403 | 账号、密码、flag、token 或工作空间权限不匹配 |
+| HTTP 408 / 5xx | 超时或服务端错误不能证明后端没执行；变更动作结果按“未知”处理 |
+| `210001` / not registered | SN 不属于当前工作空间；运行 demo_02 重新获取 |
+| `211001` / No message reply | 设备没有回复；动作可能已到达设备，先查状态/OSD，禁止盲目重发 |
+| gateway/aircraft offline | 网关或子设备离线；以 demo_02 的服务端 `status` 和 MQTT 心跳为准 |
+| current state does not support | 起飞需地面 IDLE，FlyTo 需空中 MANUAL，航线操作需匹配状态 |
+| point-flight already active | 先运行 demo_08 `status`；活动 FlyTo 用 `stop`，不要重复起飞 |
+| 请求超时 | 只是客户端停止等待，不代表设备没执行；先做身份/状态恢复 |
+| MQTT 无事件 | HTTP 状态仍可用；检查 Broker 地址、ACL、账号和设备上报 |
 
-| 字段 | 类型 | 说明 |
-|---|---|---|
-| `fly_to_id` | text | 本次 flyto 任务唯一标识 |
-| `status` | enum | 见下表 |
-| `result` | int | 返回码，非 0 代表错误 |
-| `way_point_index` | int | 当前飞往第几个航点 |
-| `remaining_distance` | float | 距目标点剩余距离（米） |
-| `remaining_time` | float | 预计剩余时间（秒） |
-| `planned_path_points` | array | 规划轨迹点 `[{latitude, longitude, height}]` |
+统一安全原则：
 
-`status` 取值：
+1. `POST/PUT/DELETE` 超时、断线、非 JSON 成功响应、HTTP 408/全部 5xx 和 211001 都视为可能已执行。
+2. 一键起飞和 FlyTo 用 point-flight 状态恢复；航线动作刷新任务列表；返航/取消返航查看 OSD 与现场。
+3. 只有收到明确业务失败，或核实设备未执行后，才由操作者决定是否重新发送。
+4. `code=0` 是“调用成功”，不是“飞行完成”。
 
-| 值 | 含义 |
-|---|---|
-| `wayline_progress` | 执行中 |
-| `wayline_ok` | 执行成功，已飞抵目标点 |
-| `wayline_failed` | 执行失败 |
-| `wayline_cancel` | 已取消飞向目标点 |
+## 7. 验证
 
-> **WebSocket 还是 MQTT？**
->
-> 服务端已补齐 `FlyToPointProgress` 模型（新增 `remainingDistance` / `remainingTime` /
-> `plannedPathPoints`），并通过 `FlyToPointProgressNotifyDTO` 将 `fly_to_id` / `status` /
-> `way_point_index` / `remaining_distance` / `remaining_time` / `planned_path_points`
-> 完整透传到 WebSocket（见 `SDKControlService.flyToPointProgress`）。该改动需**重新构建镜像**后生效。
->
-> 本 demo 仍直连 MQTT 订阅 `events`，目的是展示设备上报的原始报文格式。
-
-`planned_path_points` 每帧都会带，脚本只在首次收到时展开，避免刷屏。
-
----
-
-### `demo_09_dock_control.py` -- 设备远程控制（菜单式）
-
-交互菜单控制设备（返航、重启等）。接口为 `POST /control/api/v1/devices/{sn}/jobs/{method}`，请求体 `{}`。
+离线语法检查不会访问设备：
 
 ```bash
-./run.sh demo_09_dock_control.py
+python -m compileall -q docs/python-demo
 ```
 
-```
-设备控制菜单：
-   1. 开舱盖
-   2. 关舱盖
-   3. 开无人机电源
-   4. 关无人机电源
-   5. 一键返航（飞行器飞回返航点）
-   6. 取消返航（原地悬停）
-   7. 重启设备
-   8. 开始充电
-   ...
-选择操作编号: 5
-  [!] 确认一键返航？输入 YES 确认: YES
-[✓] 一键返航（飞行器飞回返航点） 成功
-```
+运行验证建议按风险递增：
 
-> 注：部分操作（如开舱盖、充电）仅适用于机巢场景；遥控器作为地面站上云时，返航、重启等指令仍可用。
-> 一键返航会真实改变航迹，脚本内置了 `YES` 二次确认。
-> 急停 / 紧急降落 / 强制降落等其他应急手段见 `demo_15_emergency.py`。
+1. `demo_01` 登录、`demo_02` 设备列表。
+2. `demo_03`/`demo_04` 只读遥测。
+3. 负载与直播。
+4. 在飞手、净空、应急预案和有效 GPS 条件下验证起飞、FlyTo、航线与 DRC。
 
----
-
-### `demo_10_takeoff_to_point.py` -- 一键起飞到目标坐标
-
-**前提：无人机已连接且在线（遥控器作为地面站上云），无人机处于可起飞状态。**
-
-修改文件顶部参数：
-
-```python
-TARGET_LATITUDE         = 22.5431
-TARGET_LONGITUDE        = 113.9213
-TARGET_HEIGHT           = 50.0     # 目标高度（米）
-SECURITY_TAKEOFF_HEIGHT = 20.0    # 安全起飞高度（米）
-RTH_ALTITUDE            = 100.0   # 返航高度（米）
-```
-
-```bash
-./run.sh demo_10_takeoff_to_point.py
-```
-
-执行前需要输入 `yes` 确认，防止误操作。
-
----
-
-### `demo_11_livestream.py` -- 直播全流程
-
-开始直播、切换清晰度、切换镜头、停止直播。
-
-```bash
-./run.sh demo_11_livestream.py
-```
-
-> **操作6：无流强制恢复**
->
-> 实测中 `live_start` 经常出现指令应答成功、但 MediaMTX 一直收不到推流的情况
-> （设备内部 `live_status` 卡在"已在直播"，见前文排查记录）。菜单 `6` 走这个流程：
->
-> 1. 调用 `live_start` 开始直播
-> 2. 等待 3 秒探测流
-> 3. 无流则 `live_switch_lens` 切到 `ir`，等待 1 秒
-> 4. 再切回 `zoom`，等待 10 秒后再次探测流
->
-> 通过强制切镜头触发设备重新建立推流连接，绕开卡死的内部状态位。
-
----
-
-### `demo_12_drc.py` -- DRC 指令飞行
-
-**前提：无人机已在空中，且已获取飞行控制权。**
-
-流程：`drc/connect` → `drc/enter` → MQTT 下发指令 → `drc/exit`。
-`drc/enter` 返回的 Topic 为：
-
-| 方向 | Topic |
-|---|---|
-| pub（云 → 机） | `thing/product/{sn}/drc/down` |
-| sub（机 → 云） | `thing/product/{sn}/drc/up` |
-
-DRC 下行指令：
-
-| method | data | 说明 |
-|---|---|---|
-| `heart_beat` | `{seq, timestamp}` | 心跳，必须 1 秒一次，否则设备会退出 DRC |
-| `drone_control` | `{seq, x, y, h, w}` | 摇杆飞行控制 |
-| `drone_emergency_stop` | `{}` | 急停：立即刹停并原地悬停，不降落 |
-| `drc_emergency_landing` | `{}` | 紧急降落：避障 + 识别二维码降落 |
-| `drc_force_landing` | `{}` | 强制降落：忽略障碍物直接下降 |
-
-`drone_control` 参数范围：
-
-| 参数 | 含义 | 单位 | 范围 |
-|---|---|---|---|
-| `x` | 前后速度（正=前） | m/s | -17 ~ 17 |
-| `y` | 左右速度（正=右） | m/s | -17 ~ 17 |
-| `h` | 升降速度（正=上） | m/s | -4 ~ 5 |
-| `w` | 偏航角速度（正=顺时针） | 度/s | -90 ~ 90 |
-
-DRC 上行消息（`thing/product/{sn}/drc/up`）：
-
-| method | 说明 | 脚本中的体现 |
-|---|---|---|
-| `heart_beat` | 设备原样回显下发的 `timestamp`，差值即往返时延 | `ping` 指令 |
-| `hsi_info_push` | 避障信息，上/下/前4/后4/左3/右3 共 16 路雷达距离（毫米） | `hsi` 指令 |
-
-> `hsi_info_push` 上报频率很高，脚本只缓存快照，仅在最近障碍物 < 5 m 时限频告警（最快 2 秒一次），
-> 避免刷屏淡化其他输出；随时输入 `hsi` 可查看完整六向距离。
-
-```bash
-./run.sh demo_12_drc.py
-```
-
-**交互指令：**
-```
-DRC 飞行指令（速度单位 m/s，偏航单位 度/s）：
-  fwd <n>   → 前进 n     （x=n，   -17~17）
-  back <n>  → 后退 n     （x=-n，  -17~17）
-  right <n> → 向右 n     （y=n，   -17~17）
-  left <n>  → 向左 n     （y=-n，  -17~17）
-  up <n>    → 上升 n     （h=n，    -4~5）
-  down <n>  → 下降 n     （h=-n，   -4~5）
-  yaw <n>   → 偏航 n     （w=n，  -90~90）
-  hover     → 悬停（全零）
-
-应急指令（互斥，请勿混用降落类指令）：
-  stop      → 急停       drone_emergency_stop
-  land      → 紧急降落   drc_emergency_landing
-  fland     → 强制降落   drc_force_landing
-
-状态查询：
-  hsi       → 查看最近一次避障信息（六向障碍物距离）
-  ping      → 查看心跳往返时延
-
-  q         → 退出 DRC 模式
-```
-
-> 降落类指令的执行结果在 `thing/product/{sn}/services_reply` 返回，
-> 脚本会额外建一条到主 MQTT Broker 的连接来监听（DRC 专用连接的 ACL 只放行 `drc/up`、`drc/down`）。
-
----
-
-### Joystick 失效通知
-
-`joystick_invalid_notify` 是 **DRC 手动操控不可用**的根因。一旦收到，`drone_control` 就不再生效。
-
-| 项 | 值 |
-|---|---|
-| Topic | `thing/product/{gateway_sn}/events` |
-| Direction | up（机 → 云） |
-| Method | `joystick_invalid_notify` |
-| Data | `{ "reason": int }` |
-
-`reason` 取值：
-
-| 值 | 含义 |
-|:---:|---|
-| 0 | 遥控器失联 |
-| 1 | 低电量返航 |
-| 2 | 低电量降落 |
-| 3 | 靠近限飞区 |
-| 4 | 遥控器夺权（如 B 控触发了返航） |
-
-**在三个 demo 里都有体现：**
-
-| 脚本 | 通道 | 行为 |
-|---|---|---|
-| `demo_03_websocket_osd.py` | WebSocket bizCode | 服务端转发后打印中文 reason |
-| `demo_12_drc.py` | MQTT `events` | 旁路监听，失效时醒目告警 |
-| `demo_15_emergency.py` | MQTT `events` | 失效时提示改用返航 / 降落类指令 |
-
-报文带 `need_reply: 1`，由**服务端**负责回 `events_reply`；demo 只旁路观察，不重复回复。
-
----
-
-### `demo_13_payload_advanced.py` -- 高级负载控制（YOOX 扩展）
-
-菜单式操作，包含 **Look At**（云台指向指定 GPS 坐标）、画面拖动、连续变焦、存储镜头设置。
-
-```bash
-./run.sh demo_13_payload_advanced.py
-```
-
-```
-  1-5. 画面拖动    camera_screen_drag
-  6-8. 连续变焦    camera_focal_length_drag
-  9.   Look At     camera_look_at        ← 输入经纬度 + 高度，云台自动指向该点
-  A.   照片存储设置 photo_storage_set
-  B.   视频存储设置 video_storage_set
-```
-
-Look At 参数：`locked`（是否锁定机头与云台相对关系）、`latitude`（-90~90）、`longitude`（-180~180）、`height`（2~10000 米）。
-
----
-
-### `demo_14_target_detection.py` -- 目标识别（YOOX 扩展）
-
-开启/关闭目标识别，并接收识别结果。
-
-```bash
-./run.sh demo_14_target_detection.py
-```
-
----
-
-### `demo_15_emergency.py` -- 应急处置（返航 / 急停 / 紧急降落 / 强制降落）
-
-把飞行安全相关的指令集中在一个脚本里，紧急情况下一键触发。
-
-```bash
-./run.sh demo_15_emergency.py
-```
-
-```
-应急处置菜单：
-  --- HTTP 通道（无需 DRC 模式）---
-  1. 一键返航      return_home
-  2. 取消返航      return_home_cancel
-
-  --- MQTT 通道（需先进入 DRC 模式，见 e）---
-  3. 急停          drone_emergency_stop   立即刹停并原地悬停，不降落
-  4. 紧急降落      drc_emergency_landing  避障 + 识别二维码降落
-  5. 强制降落      drc_force_landing      忽略障碍物直接下降
-
-  --- 辅助 ---
-  e. 进入 DRC 模式
-  x. 退出 DRC 模式
-  q. 退出
-```
-
-**通道说明：**
-
-| 指令 | 通道 | 地址 | 是否需要 DRC 模式 |
-|---|---|---|:---:|
-| `return_home` | HTTP | `POST /control/api/v1/devices/{sn}/jobs/return_home` | 否 |
-| `return_home_cancel` | HTTP | `POST /control/api/v1/devices/{sn}/jobs/return_home_cancel` | 否 |
-| `drone_emergency_stop` | MQTT | `thing/product/{sn}/drc/down` | 是 |
-| `drc_emergency_landing` | MQTT | `thing/product/{sn}/drc/down` | 是 |
-| `drc_force_landing` | MQTT | `thing/product/{sn}/drc/down` | 是 |
-
-MQTT 指令下发格式（`data` 均为 `{}`）：
-
-```json
-{
-  "tid": "...",
-  "bid": "...",
-  "timestamp": 1730000000000,
-  "method": "drc_emergency_landing",
-  "data": {}
-}
-```
-
-回复在 `thing/product/{sn}/services_reply`，`method` 与下发一致，`data.result == 0` 表示成功，非 0 表示失败。
-
-脚本同时订阅 `thing/product/{sn}/events`，收到 `joystick_invalid_notify` 时会提醒手动操控已不可用。
-
-> **紧急降落 vs 强制降落**
->
-> | | `drc_emergency_landing` | `drc_force_landing` |
-> |---|---|---|
-> | 避障 | 会避障 | 不避障 |
-> | 降落点 | 识别二维码降落点 | 原地垂直下降 |
-> | 适用 | 常规应急降落 | 避障失效/必须立即落地 |
->
-> **两者是独立逻辑，同一次处置中只能选其一，不要混用**，否则降落行为不可预期。
->
-> 急停 `drone_emergency_stop` 只刹停悬停，**不会降落**，通常用于先稳住飞机再决定后续动作。
-
----
-
-## 推荐执行顺序
-
-```
-1. demo_01  验证服务可达，拿到 token
-2. demo_02  获取设备 SN 和 payload_index，填入 config.py
-3. demo_03  开一个单独终端实时监听 WebSocket 推送（全程保持）
-4. demo_04  MQTT 原始 OSD 监听（可选，数据更完整）
-5. demo_09  通过菜单执行返航、重启等设备控制
-6. demo_10  一键起飞到目标点（或由飞手手动起飞）
-7. demo_05  调整变焦
-8. demo_06  控制云台方向
-9. demo_07  拍照或录像
-10. demo_08 飞向另一坐标
-11. demo_11 直播推流
-12. demo_12 DRC 指令飞行（摇杆控制）
-13. demo_13 Look At / 画面拖动等高级负载控制
-14. demo_14 目标识别
-15. demo_16 Look At（GPS 指向，独立脚本）
-16. demo_17 航线任务全流程（下发/执行/暂停/恢复/取消/进度上报）
-
-全程备用：demo_15 应急处置（返航 / 急停 / 紧急降落 / 强制降落）
-```
-
----
-
-## 常见错误
-
-| 错误信息 | 原因 | 解决方法 |
-|---|---|---|
-| `ModuleNotFoundError: No module named 'requests'` | 未激活虚拟环境或未安装依赖 | 改用 `./run.sh` 或先 `source .venv/bin/activate` |
-| `externally-managed-environment` | 直接用系统 pip 安装 | 必须用 `python3 -m venv .venv` 建虚拟环境 |
-| `Connection refused` | 服务未启动或 IP 填错 | 检查 Docker 容器状态和 `config.py` 中的 `SERVER_IP` |
-| `invalid username` | 账号不存在 | 默认账号为 `admin`（Web）或 `pilot`（App） |
-| `The account type does not match.` | flag 和账号类型不符 | admin 用 flag=1，pilot 用 flag=2 |
-| `The dock is offline` | 设备未上线 | 检查设备 MQTT 连接，确认设备 SN 填写正确 |
-| `The current state does not support this function` | 设备状态不满足 | 查看 demo_03 的 OSD 确认当前 mode_code |
-
----
-
-## 文件结构
-
-```
-docs/python-demo/
-├── config.py                      # ← 必须先修改这个
-├── run.sh                         # 一键运行脚本（自动管理 venv）
-├── requirements.txt               # 依赖声明（requests / websocket-client / paho-mqtt）
-├── .venv/                         # 虚拟环境（自动创建，已 gitignore）
-│
-├── ── Cloud-API 通用（原版可用） ──
-├── demo_01_login.py               # 登录验证
-├── demo_02_devices.py             # 设备列表和直播能力
-├── demo_03_websocket_osd.py       # 实时遥测监听（OSD/进度/目标识别/DRC事件）
-├── demo_04_mqtt_osd.py            # MQTT 原始 OSD 数据监听（比 WebSocket 更完整）
-├── demo_05_gimbal_zoom.py         # 云台变焦（camera_focal_length_set）
-├── demo_06_gimbal_pitch.py        # 云台方向（camera_aim 屏幕坐标 + gimbal_reset）
-├── demo_07_camera.py              # 拍照/录像（photo_take / recording）
-├── demo_08_fly_to_point.py        # 飞向目标点（抢控制权 + 完整进度监听）
-├── demo_09_dock_control.py        # 设备控制菜单（返航/重启等）
-├── demo_10_takeoff_to_point.py    # 一键起飞到目标点
-├── demo_11_livestream.py          # 直播全流程（开始/停止/清晰度/切镜头）
-├── demo_12_drc.py                 # DRC 指令飞行（连接->进入->MQTT摇杆/应急->退出）
-├── demo_15_emergency.py           # 应急处置（返航/急停/紧急降落/强制降落）
-├── demo_16_look_at.py             # 负载 Look At（抢负载控制权 + camera_look_at）
-├── demo_17_wayline.py             # 航线任务全流程（下发/执行/暂停/恢复/取消/进度）
-│
-├── ── YOOX Cloud GCS 扩展接口 ──
-├── demo_13_payload_advanced.py    # 画面拖动/连续变焦/Look At/存储设置
-└── demo_14_target_detection.py    # 目标识别（开启/关闭/结果接收）
-```
-
-### Cloud-API vs YOOX Cloud GCS 接口对比
-
-| 功能 | 指令/接口 | Cloud-API | YOOX |
-|---|---|:---:|:---:|
-| 变焦（精确值） | `camera_focal_length_set` | ✅ | ✅ |
-| 画面拖动（连续转速） | `camera_screen_drag` | ❌ | ✅ |
-| 连续变焦（放大/缩小/停止） | `camera_focal_length_drag` | ❌ | ✅ |
-| 屏幕坐标指点 | `camera_aim` | ✅ | ✅ |
-| Look At（GPS指向） | `camera_look_at` | ✅ | ✅ |
-| 照片存储镜头设置 | `photo_storage_set` | ❌ | ✅ |
-| 视频存储镜头设置 | `video_storage_set` | ❌ | ✅ |
-| 目标识别开启/关闭 | `POST/DELETE .../target-detection` | ❌ | ✅ |
-| DRC 指令飞行 | `drc/connect` + `drc/enter` + MQTT | ✅ | ✅ |
-| 飞行控制权抢夺 | `flight_authority_grab` | ✅ | ✅ |
-| 负载控制权抢夺 | `POST .../authority/payload` | ✅ | ✅ |
-| 一键返航 / 取消返航 | `jobs/return_home(_cancel)` | ✅ | ✅ |
-| 急停（刹停悬停） | `drone_emergency_stop` | ✅ | ✅ |
-| 紧急降落（避障+二维码） | `drc_emergency_landing` | ❌ | ✅ |
-| 强制降落（不避障） | `drc_force_landing` | ❌ | ✅ |
-| 直播全流程 | `/live/streams/*` | ✅ | ✅ |
+所有真实飞行动作都应保留现场飞手和可用的返航/降落处置手段。

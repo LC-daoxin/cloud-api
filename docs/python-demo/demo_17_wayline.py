@@ -1,257 +1,457 @@
+"""航线任务全流程：下发执行、进度上报、暂停、继续与取消。
+
+REST 接口由当前 GCS 服务端负责转换为 ``flighttask_prepare/execute/pause/
+recovery/undo``。RC 网关的 ``device_list`` 也由服务端统一补齐，Demo 不直接
+拼 MQTT 控制报文。任何动作请求超时都只刷新状态，不会自动重发。
 """
-demo_17_wayline.py -- 航线任务全流程（下发 / 执行 / 暂停 / 恢复 / 取消 / 进度上报）
+from __future__ import annotations
 
-对应 Autel Cloud API「航线管理」：
-  下发任务   flighttask_prepare    Topic: thing/product/{gateway_sn}/services  down
-  执行任务   flighttask_execute    （立即任务由服务端在 prepare 后自动下发 execute）
-  航线暂停   flighttask_pause
-  航线恢复   flighttask_recovery
-  取消任务   flighttask_undo
-  上报进度   flighttask_progress   Topic: thing/product/{gateway_sn}/events    up
-
-REST 封装（cloud-service）：
-  列航线库   GET    /wayline/api/v1/workspaces/{workspace}/waylines
-  下发+执行  POST   /wayline/api/v1/workspaces/{workspace}/flight-tasks   （立即任务）
-  暂停/恢复  PUT    /wayline/api/v1/workspaces/{workspace}/jobs/{job_id}  body={"status":0|1}
-             status=0 暂停(flighttask_pause)，status=1 恢复(flighttask_recovery)
-  取消任务   DELETE /wayline/api/v1/workspaces/{workspace}/jobs?job_id={job_id}
-  任务列表   GET    /wayline/api/v1/workspaces/{workspace}/jobs
-
-进度事件 flighttask_progress 字段：
-  | 字段                    | 说明                                              |
-  |-------------------------|---------------------------------------------------|
-  | status                  | sent/in_progress/paused/ok/failed/canceled/...    |
-  | progress.current_step   | 执行步骤枚举                                       |
-  | progress.percent        | 当前步骤进度百分比 0~100                            |
-  | ext.current_waypoint_index | 当前执行到的航点序号（从 0 开始）               |
-  | ext.media_count         | 本次任务已产生的媒体文件数                          |
-  | ext.flight_id           | 航线任务唯一 ID                                    |
-
-【RC 网关注意】遥控器（REMOTER_CONTROL 域）作为网关时，服务端会自动为
-flighttask_prepare/execute/undo/pause/recovery 补上 device_list 显式寻址无人机 SN，
-否则遥控器静默丢弃指令、永不回复（211001）。分流逻辑在 FlightTaskServiceImpl 中按
-网关域自动完成，demo 无需关心。
-
-前提：航线库中已有 KMZ 航线文件（可在 Web 控制台「航线任务」页上传），
-      config.py 的 DOCK_SN 为执行网关（机巢或遥控器）SN、WORKSPACE_ID 正确。
-
-运行：
-    python3 demo_17_wayline.py            # 交互菜单：下发/暂停/恢复/取消/查看
-"""
-import sys
 import json
-import time
 import threading
-import requests
-from config import (BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG,
-                    DOCK_SN, WORKSPACE_ID, MQTT_HOST, MQTT_PORT,
-                    MQTT_USERNAME, MQTT_PASSWORD)
+import time
+from typing import Any, Callable
 
-if DOCK_SN == "YOUR_DOCK_SN":
-    print("[✗] 请先在 config.py 中设置 DOCK_SN")
-    sys.exit(1)
+import paho.mqtt.client as mqtt
 
-EVENTS_TOPIC = f"thing/product/{DOCK_SN}/events"
-FLIGHTTASK_STATUS = {
-    "sent": "已下发", "in_progress": "执行中", "paused": "暂停",
-    "ok": "执行成功", "failed": "失败", "canceled": "取消或终止",
-    "partially_done": "部分完成", "rejected": "拒绝", "timeout": "超时",
-    "pending": "开始执行",
+from config import (
+    DOCK_SN,
+    MQTT_HOST,
+    MQTT_PASSWORD,
+    MQTT_PORT,
+    MQTT_USERNAME,
+    WORKSPACE_ID,
+)
+from demo_common import (
+    DemoApiError,
+    DemoError,
+    api_call,
+    choose,
+    login,
+    print_error_and_hint,
+    require_config,
+)
+
+
+JOB_STATUS = {
+    1: "待执行",
+    2: "执行中",
+    3: "成功",
+    4: "已取消",
+    5: "失败",
+    6: "已暂停",
 }
-FINAL_STATUS = {"ok", "failed", "canceled", "partially_done", "rejected", "timeout"}
+PAUSABLE = {2}
+RESUMABLE = {6}
+CANCELABLE = {1, 2, 4, 6}
+FINAL_JOB_STATUS = {3, 4, 5}
+
+FLIGHTTASK_STATUS = {
+    "sent": "已下发",
+    "in_progress": "执行中",
+    "paused": "已暂停",
+    "ok": "执行成功",
+    "failed": "失败",
+    "canceled": "已取消",
+    "partially_done": "部分完成",
+    "rejected": "已拒绝",
+    "timeout": "超时",
+    "pending": "准备执行",
+}
 
 
-def get_token():
-    resp = requests.post(f"{BASE_URL}/manage/api/v1/login",
-                         json={"username": WEB_USERNAME, "password": WEB_PASSWORD, "flag": WEB_FLAG},
-                         timeout=10)
-    return resp.json()["data"]["access_token"]
-
-
-def _headers(token):
-    return {"x-auth-token": token, "Content-Type": "application/json"}
-
-
-def _items(data):
-    """兼容分页返回：data 可能是 list 或 {list:[...]} / {records:[...]}"""
+def _items(data: Any) -> list[dict[str, Any]]:
     if isinstance(data, list):
-        return data
+        return [item for item in data if isinstance(item, dict)]
     if isinstance(data, dict):
-        return data.get("list") or data.get("records") or []
+        for key in ("list", "records", "items"):
+            value = data.get(key)
+            if isinstance(value, list):
+                return [item for item in value if isinstance(item, dict)]
     return []
 
 
-def list_waylines(token):
-    url = (f"{BASE_URL}/wayline/api/v1/workspaces/{WORKSPACE_ID}/waylines"
-           f"?page=1&page_size=50&order_by=update_time%20desc")
-    resp = requests.get(url, headers=_headers(token), timeout=15)
-    return _items(resp.json().get("data"))
+def list_waylines(token: str) -> list[dict[str, Any]]:
+    result = api_call(
+        token,
+        "GET",
+        f"/wayline/api/v1/workspaces/{WORKSPACE_ID}/waylines",
+        action="查询航线库",
+        params={"page": 1, "page_size": 50, "order_by": "update_time desc"},
+        timeout=15,
+    )
+    return _items(result.get("data"))
 
 
-def list_jobs(token):
-    url = f"{BASE_URL}/wayline/api/v1/workspaces/{WORKSPACE_ID}/jobs?page=1&page_size=50"
-    resp = requests.get(url, headers=_headers(token), timeout=15)
-    return _items(resp.json().get("data"))
+def list_jobs(token: str) -> list[dict[str, Any]]:
+    result = api_call(
+        token,
+        "GET",
+        f"/wayline/api/v1/workspaces/{WORKSPACE_ID}/jobs",
+        action="查询航线任务",
+        params={"page": 1, "page_size": 50},
+        timeout=15,
+    )
+    return _items(result.get("data"))
 
 
-def create_job(token, wayline: dict) -> bool:
-    """下发并立即执行（flighttask_prepare + flighttask_execute）"""
-    url = f"{BASE_URL}/wayline/api/v1/workspaces/{WORKSPACE_ID}/flight-tasks"
+def _job_id(job: dict[str, Any]) -> str:
+    return str(job.get("job_id") or "")
+
+
+def _job_status(job: dict[str, Any]) -> int:
+    try:
+        return int(job.get("status"))
+    except (TypeError, ValueError):
+        return -1
+
+
+def _job_line(job: dict[str, Any]) -> str:
+    status = _job_status(job)
+    return (
+        f"{job.get('job_name') or '(未命名)'} | {JOB_STATUS.get(status, status)} "
+        f"| {job.get('progress', 0) or 0}% | id={_job_id(job)}"
+    )
+
+
+def _find_job(token: str, job_id: str) -> dict[str, Any] | None:
+    return next((job for job in list_jobs(token) if _job_id(job) == job_id), None)
+
+
+def _wait_job(
+    token: str,
+    predicate: Callable[[dict[str, Any]], bool],
+    *,
+    timeout: float = 12,
+) -> dict[str, Any] | None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        for job in list_jobs(token):
+            if predicate(job):
+                return job
+        time.sleep(1)
+    return None
+
+
+def create_job(token: str, wayline: dict[str, Any]) -> bool:
+    file_id = str(wayline.get("id") or "")
+    if not file_id:
+        print("[✗] 航线记录缺少 id，不能下发")
+        return False
+    template_types = wayline.get("template_types") or [0]
+    task_name = f"{wayline.get('name') or 'wayline'}-demo-{int(time.time() * 1000)}"
     body = {
-        "name": f"{wayline.get('name', 'wayline')}-demo-{int(time.time())}",
-        "file_id": wayline["id"],
+        "name": task_name,
+        "file_id": file_id,
         "dock_sn": DOCK_SN,
-        "wayline_type": (wayline.get("template_types") or [0])[0],
-        "task_type": 0,               # 0=立即任务，服务端 prepare 后自动 execute
-        "rth_altitude": 100,          # 返航高度 20~1500 m
-        "out_of_control_action": 0,   # 0=返航 1=悬停 2=降落
+        "wayline_type": template_types[0],
+        # 立即任务：服务端成功 prepare 后立即 execute。
+        "task_type": 0,
+        "rth_altitude": 100,
+        "out_of_control_action": 0,
         "min_battery_capacity": 50,
         "min_storage_capacity": 0,
-        "wayline_precision_type": 0,  # 0=GPS 1=RTK
-        "barrier_switch_state": 1,    # 1=打开避障
+        "wayline_precision_type": 0,
+        "barrier_switch_state": 1,
         "takeoff_altitude": 100,
         "first_waypoint_speed": 10,
         "return_speed": 10,
-        "media_upload_method": 0,     # 0=落地上传 1=边飞边传
+        "media_upload_method": 0,
         "alternate_land_point": {"is_configured": 0},
     }
-    print(f"[*] 下发航线任务: {body['name']} （航线={wayline.get('name')}）")
-    resp = requests.post(url, headers=_headers(token), json=body, timeout=30)
-    result = resp.json()
-    ok = result.get("code") == 0
-    print(f"[{'✓' if ok else '✗'}] {result.get('message', result)}")
-    return ok
+    print(f"[*] 下发并执行航线: {task_name}")
+    if input(
+        f"[!!] 确认立即执行真实航线？dock={DOCK_SN} "
+        f"rth={body['rth_altitude']}m takeoff={body['takeoff_altitude']}m；输入 YES: "
+    ).strip() != "YES":
+        print("[*] 已取消航线下发")
+        return False
+    ambiguous = False
+    try:
+        api_call(
+            token,
+            "POST",
+            f"/wayline/api/v1/workspaces/{WORKSPACE_ID}/flight-tasks",
+            action="下发并执行航线任务",
+            json_body=body,
+            # prepare + execute 各自等待设备回复，给同步链路更充足时间。
+            timeout=45,
+        )
+    except DemoApiError as exc:
+        print_error_and_hint(exc)
+        if not exc.ambiguous:
+            return False
+        ambiguous = True
+
+    # 创建接口不返回 job_id，以唯一任务名从列表恢复；超时时同样禁止重发。
+    job = _wait_job(token, lambda item: item.get("job_name") == task_name, timeout=15)
+    if not job:
+        print("[!!] 未能在任务列表中恢复本次任务；不要重复创建，稍后按任务名查询。")
+        return False
+    print(f"[{'恢复' if ambiguous else '✓'}] {_job_line(job)}")
+    return True
 
 
-def change_job(token, job_id: str, status: int) -> bool:
-    """status=0 暂停(flighttask_pause)，status=1 恢复(flighttask_recovery)"""
-    url = f"{BASE_URL}/wayline/api/v1/workspaces/{WORKSPACE_ID}/jobs/{job_id}"
-    resp = requests.put(url, headers=_headers(token), json={"status": status}, timeout=15)
-    result = resp.json()
-    ok = result.get("code") == 0
-    action = "暂停" if status == 0 else "恢复"
-    print(f"[{'✓' if ok else '✗'}] {action}任务: {result.get('message', result)}")
-    return ok
+def change_job(token: str, job: dict[str, Any], target_status: int) -> bool:
+    job_id = _job_id(job)
+    action = "暂停" if target_status == 0 else "继续"
+    allowed = PAUSABLE if target_status == 0 else RESUMABLE
+
+    # 每次动作前重新读取，避免使用菜单打开后的陈旧状态。
+    current = _find_job(token, job_id)
+    if not current:
+        print("[✗] 任务已不存在或不属于当前工作空间")
+        return False
+    status = _job_status(current)
+    if status not in allowed:
+        print(
+            f"[✗] 当前状态为 {JOB_STATUS.get(status, status)}，"
+            f"不能{action}；请刷新后选择正确任务"
+        )
+        return False
+
+    ambiguous = False
+    try:
+        api_call(
+            token,
+            "PUT",
+            f"/wayline/api/v1/workspaces/{WORKSPACE_ID}/jobs/{job_id}",
+            action=f"{action}航线任务",
+            json_body={"status": target_status},
+            timeout=25,
+        )
+    except DemoApiError as exc:
+        print_error_and_hint(exc)
+        if not exc.ambiguous:
+            return False
+        ambiguous = True
+
+    expected = 6 if target_status == 0 else 2
+    updated = _wait_job(
+        token,
+        lambda item: _job_id(item) == job_id and _job_status(item) == expected,
+        timeout=10,
+    )
+    if updated:
+        print(f"[{'恢复' if ambiguous else '✓'}] {action}已确认: {_job_line(updated)}")
+        return True
+    print(f"[!!] {action}结果尚未确认；不要自动重发，先观察 progress/OSD 后刷新列表。")
+    return False
 
 
-def cancel_job(token, job_id: str) -> bool:
-    """flighttask_undo —— 取消任务"""
-    url = (f"{BASE_URL}/wayline/api/v1/workspaces/{WORKSPACE_ID}/jobs"
-           f"?job_id={requests.utils.quote(job_id)}")
-    resp = requests.delete(url, headers=_headers(token), timeout=15)
-    result = resp.json()
-    ok = result.get("code") == 0
-    print(f"[{'✓' if ok else '✗'}] 取消任务: {result.get('message', result)}")
-    return ok
+def cancel_job(token: str, job: dict[str, Any]) -> bool:
+    job_id = _job_id(job)
+    current = _find_job(token, job_id)
+    if not current:
+        print("[✗] 任务已不存在或不属于当前工作空间")
+        return False
+    status = _job_status(current)
+    already_canceled = status == 4
+    if status not in CANCELABLE:
+        print(f"[✗] {JOB_STATUS.get(status, status)}任务不可取消")
+        return False
+    prompt_action = "对已取消任务执行幂等收敛" if status == 4 else "取消"
+    if input(f"[!] 确认{prompt_action}“{current.get('job_name')}”？输入 YES: ").strip() != "YES":
+        print("[*] 已取消操作")
+        return False
+
+    ambiguous = False
+    try:
+        api_call(
+            token,
+            "DELETE",
+            f"/wayline/api/v1/workspaces/{WORKSPACE_ID}/jobs",
+            action="取消航线任务",
+            params={"job_id": job_id},
+            timeout=30,
+        )
+    except DemoApiError as exc:
+        print_error_and_hint(exc)
+        if not exc.ambiguous:
+            # 运行中取消的后端流程是 pause 后 undo。undo 明确失败时
+            # 任务可能已停在 PAUSED，所以失败后也必须刷新，不能继续用旧状态。
+            refreshed = _find_job(token, job_id)
+            if refreshed:
+                print(f"[*] 取消失败后已刷新: {_job_line(refreshed)}")
+                if _job_status(refreshed) == 6:
+                    print("[!] 暂停已生效但撤销未完成；可在确认设备状态后重试取消或选择继续")
+            return False
+        ambiguous = True
+
+    if already_canceled:
+        if ambiguous:
+            print("[!!] 任务原本已是取消状态，状态 4 无法证明本次缓存收敛已执行；结果未知。")
+            print("     不要盲目重发；请由服务端日志/Redis 只读检查确认残留状态。")
+            return False
+        print(f"[✓] 已取消任务的幂等本地收敛调用成功: {_job_line(current)}")
+        return True
+
+    updated = _wait_job(
+        token,
+        lambda item: _job_id(item) == job_id and _job_status(item) == 4,
+        timeout=12,
+    )
+    if updated:
+        print(f"[{'恢复' if ambiguous else '✓'}] 取消已确认: {_job_line(updated)}")
+        return True
+    refreshed = _find_job(token, job_id)
+    if refreshed:
+        print(f"[*] 当前任务状态: {_job_line(refreshed)}")
+    print("[!!] 取消结果尚未确认；不要自动重发，先观察 progress/OSD 并刷新任务列表。")
+    return False
 
 
-class ProgressWatcher(threading.Thread):
-    """后台订阅 events，打印 flighttask_progress 进度事件"""
+class ProgressWatcher:
+    """旁路订阅设备 ``flighttask_progress``，REST 查询仍是操作前的依据。"""
 
-    def __init__(self):
-        super().__init__(daemon=True)
-        try:
-            import paho.mqtt.client as mqtt
-        except ImportError:
-            self.client = None
-            return
-        self.client = mqtt.Client(client_id=f"demo17_wayline_{int(time.time())}")
+    def __init__(self) -> None:
+        self.topic = f"thing/product/{DOCK_SN}/events"
+        self.connected = threading.Event()
+        self.subscribed = threading.Event()
+        self._stopping = False
+        self.client = mqtt.Client(
+            callback_api_version=mqtt.CallbackAPIVersion.VERSION2,
+            client_id=f"demo17_wayline_{int(time.time())}",
+        )
         if MQTT_USERNAME:
             self.client.username_pw_set(MQTT_USERNAME, MQTT_PASSWORD)
         self.client.on_connect = self._on_connect
+        self.client.on_subscribe = self._on_subscribe
+        self.client.on_disconnect = self._on_disconnect
         self.client.on_message = self._on_message
 
-    def run(self):
-        if self.client is None:
-            print("[!] 未安装 paho-mqtt，跳过进度订阅（pip install paho-mqtt 可开启）")
-            return
+    def start(self) -> bool:
         try:
             self.client.connect(MQTT_HOST, MQTT_PORT, keepalive=60)
-            self.client.loop_forever()
-        except Exception as e:
-            print(f"[!] MQTT 连接失败，跳过进度订阅: {e}")
+            self.client.loop_start()
+        except Exception as exc:
+            print(f"[!] MQTT 进度监听启动失败: {exc}；REST 操作仍可使用")
+            return False
+        if not self.connected.wait(5) or not self.subscribed.wait(5):
+            print("[!] MQTT 连接/订阅未确认；REST 操作仍可使用")
+            return False
+        return True
 
-    def _on_connect(self, client, userdata, flags, rc):
-        if rc == 0:
-            client.subscribe(EVENTS_TOPIC)
-            print(f"[✓] 已订阅进度事件 {EVENTS_TOPIC}")
+    def _on_connect(self, client, userdata, flags, reason_code, properties) -> None:
+        if reason_code == 0:
+            self.connected.set()
+            client.subscribe(self.topic, qos=0)
+        else:
+            print(f"[!] MQTT 连接被拒绝: {reason_code}")
 
-    def _on_message(self, client, userdata, msg):
+    def _on_subscribe(self, client, userdata, mid, reason_code_list, properties) -> None:
+        self.subscribed.set()
+        print(f"[✓] 已订阅航线进度 {self.topic}")
+
+    def _on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties) -> None:
+        if not self._stopping and reason_code != 0:
+            print(f"[!] MQTT 进度监听断开: {reason_code}")
+
+    def _on_message(self, client, userdata, message) -> None:
         try:
-            payload = json.loads(msg.payload)
+            payload = json.loads(message.payload.decode("utf-8"))
+            if payload.get("method") != "flighttask_progress":
+                return
+            data = payload.get("data") or {}
+            output = data.get("output") or {}
+            progress = output.get("progress") or {}
+            ext = output.get("ext") or {}
+            status = str(output.get("status") or "")
+            job_id = str(payload.get("bid") or data.get("bid") or ext.get("flight_id") or "")
+            result = data.get("result")
+            if isinstance(result, dict):
+                result = result.get("code")
+            print(
+                f"\n[任务上报] id={job_id or '?'} "
+                f"status={FLIGHTTASK_STATUS.get(status, status or '?')} "
+                f"step={progress.get('current_step')} percent={progress.get('percent')} "
+                f"waypoint={ext.get('current_waypoint_index')} result={result}"
+            )
+        except Exception as exc:
+            print(f"[!] 航线进度消息解析失败: {exc}")
+
+    def stop(self) -> None:
+        self._stopping = True
+        try:
+            self.client.loop_stop()
+            self.client.disconnect()
         except Exception:
-            return
-        if payload.get("method") != "flighttask_progress":
-            return
-        output = (payload.get("data") or {}).get("output") or payload.get("data") or {}
-        status = output.get("status", "")
-        progress = output.get("progress") or {}
-        ext = output.get("ext") or {}
-        label = FLIGHTTASK_STATUS.get(status, status)
-        print(f"  ↳ 进度 status={label} step={progress.get('current_step')} "
-              f"percent={progress.get('percent')} waypoint={ext.get('current_waypoint_index')}")
-        if status in FINAL_STATUS:
-            print(f"[✓] 航线任务终态: {label}")
+            pass
 
 
-def _pick(prompt, items, render):
-    if not items:
+def _select_job(token: str, statuses: set[int], verb: str) -> dict[str, Any] | None:
+    jobs = [job for job in list_jobs(token) if _job_status(job) in statuses]
+    if not jobs:
+        labels = "/".join(JOB_STATUS[item] for item in sorted(statuses))
+        print(f"[!] 没有可{verb}的任务（要求状态：{labels}）")
         return None
-    for i, it in enumerate(items):
-        print(f"  {i}. {render(it)}")
-    raw = input(prompt).strip()
-    if not raw.isdigit() or int(raw) >= len(items):
-        return None
-    return items[int(raw)]
+    return choose(jobs, "选择任务序号> ", _job_line)
+
+
+def menu(token: str) -> None:
+    while True:
+        print("\n航线任务菜单：")
+        print("  1. 下发并立即执行（flighttask_prepare + execute）")
+        print("  2. 暂停执行中任务（flighttask_pause）")
+        print("  3. 继续已暂停任务（flighttask_recovery）")
+        print("  4. 取消待执行/执行中/已暂停任务；已取消任务可做幂等收敛")
+        print("  5. 刷新任务列表")
+        print("  0. 退出")
+        choice_value = input("选择> ").strip()
+        try:
+            if choice_value == "0":
+                return
+            if choice_value == "1":
+                waylines = list_waylines(token)
+                if not waylines:
+                    print("[!] 航线库为空，请先在 Web 控制台上传 KMZ")
+                    continue
+                selected = choose(
+                    waylines,
+                    "选择航线序号> ",
+                    lambda item: f"{item.get('name')} ({item.get('drone_model_key', '—')})",
+                )
+                if selected:
+                    create_job(token, selected)
+            elif choice_value == "2":
+                selected = _select_job(token, PAUSABLE, "暂停")
+                if selected:
+                    change_job(token, selected, 0)
+            elif choice_value == "3":
+                selected = _select_job(token, RESUMABLE, "继续")
+                if selected:
+                    change_job(token, selected, 1)
+            elif choice_value == "4":
+                selected = _select_job(token, CANCELABLE, "取消")
+                if selected:
+                    cancel_job(token, selected)
+            elif choice_value == "5":
+                jobs = list_jobs(token)
+                if not jobs:
+                    print("  (无任务)")
+                for job in jobs:
+                    print(f"  - {_job_line(job)}")
+            else:
+                print("[!] 无效选择")
+        except DemoError as exc:
+            print_error_and_hint(exc)
+
+
+def main() -> int:
+    require_config(YOOX_DOCK_SN=DOCK_SN, YOOX_WORKSPACE_ID=WORKSPACE_ID)
+    print(f"[*] 目标网关: {DOCK_SN}  工作空间: {WORKSPACE_ID}")
+    token = login()
+    watcher = ProgressWatcher()
+    watcher.start()
+    try:
+        menu(token)
+    finally:
+        watcher.stop()
+    return 0
 
 
 if __name__ == "__main__":
-    print(f"[*] 目标网关: {DOCK_SN}  工作空间: {WORKSPACE_ID}")
-    token = get_token()
-
-    ProgressWatcher().start()
-    time.sleep(1)
-
-    while True:
-        print("\n航线任务菜单：")
-        print("  1. 下发并立即执行（从航线库选择 KMZ）")
-        print("  2. 暂停任务")
-        print("  3. 恢复任务")
-        print("  4. 取消任务")
-        print("  5. 查看任务列表")
-        print("  0. 退出")
-        choice = input("选择> ").strip()
-
-        if choice == "1":
-            waylines = list_waylines(token)
-            if not waylines:
-                print("[!] 航线库为空，请先在 Web 控制台上传 KMZ 航线")
-                continue
-            wl = _pick("选择航线序号> ", waylines,
-                       lambda w: f"{w.get('name')} ({w.get('drone_model_key', '—')})")
-            if wl:
-                create_job(token, wl)
-        elif choice in ("2", "3", "4"):
-            jobs = [j for j in list_jobs(token) if j.get("status") in (1, 2, 6)]
-            if not jobs:
-                print("[!] 没有可操作的任务（待执行/进行中/已暂停）")
-                continue
-            job = _pick("选择任务序号> ", jobs,
-                        lambda j: f"{j.get('job_name')} 状态={j.get('status')}")
-            if not job:
-                continue
-            jid = job["job_id"]
-            if choice == "2":
-                change_job(token, jid, 0)
-            elif choice == "3":
-                change_job(token, jid, 1)
-            else:
-                cancel_job(token, jid)
-        elif choice == "5":
-            for j in list_jobs(token):
-                print(f"  - {j.get('job_name')} | 状态={j.get('status')} "
-                      f"| 进度={j.get('progress', 0)}% | id={j.get('job_id')}")
-        elif choice == "0":
-            break
-        else:
-            print("[!] 无效选择")
+    try:
+        raise SystemExit(main())
+    except DemoError as exc:
+        print_error_and_hint(exc)
+        raise SystemExit(1)
