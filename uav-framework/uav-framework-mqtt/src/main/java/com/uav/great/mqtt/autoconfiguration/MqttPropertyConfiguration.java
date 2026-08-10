@@ -35,14 +35,30 @@ public class MqttPropertyConfiguration {
         return mqtt.get(MqttUseEnum.BASIC);
     }
 
+    /**
+     * 应用自身连接 Broker 使用的地址（容器内部，默认走 compose 服务名）。
+     */
     public static String getBasicMqttAddress() {
-        return getMqttAddress(getBasicClientOptions());
+        return getMqttAddress(getBasicClientOptions(), false);
     }
 
-    private static String getMqttAddress(MqttClientOptions options) {
+    /**
+     * 返回给外部设备（Pilot App / 遥控器 / 无人机）的对外 Broker 地址。
+     * 桥接网络下必须通过 external-host 单独配置宿主机局域网 IP，
+     * 否则容器内地址对外部不可达。
+     */
+    public static String getBasicExternalMqttAddress() {
+        return getMqttAddress(getBasicClientOptions(), true);
+    }
+
+    private static String getMqttAddress(MqttClientOptions options, boolean external) {
+        String host = options.getHost();
+        if (external && StringUtils.hasText(options.getExternalHost())) {
+            host = options.getExternalHost();
+        }
         StringBuilder addr = new StringBuilder()
                 .append(options.getProtocol().getProtocolAddr())
-                .append(options.getHost().trim())
+                .append(host.trim())
                 .append(":")
                 .append(options.getPort());
         if ((options.getProtocol() == MqttProtocolEnum.WS || options.getProtocol() == MqttProtocolEnum.WSS)
@@ -60,13 +76,35 @@ public class MqttPropertyConfiguration {
 
         String token = JwtUtil.createToken(map, age, algorithm, null, null);
 
+        MqttClientOptions drcOptions = mqtt.get(MqttUseEnum.DRC);
+        // DRC 地址返回给外部客户端使用；external-host 未单独配置时回退到 host
+        String drcHost = drcOptions.getHost();
+        if (StringUtils.hasText(drcOptions.getExternalHost())) {
+            drcHost = drcOptions.getExternalHost();
+        } else if (mqtt.containsKey(MqttUseEnum.BASIC)
+                && StringUtils.hasText(mqtt.get(MqttUseEnum.BASIC).getExternalHost())) {
+            drcHost = mqtt.get(MqttUseEnum.BASIC).getExternalHost();
+        }
         return new DrcModeMqttBroker()
-                .setAddress(getMqttAddress(mqtt.get(MqttUseEnum.DRC)))
+                .setAddress(getMqttAddressWithHost(drcOptions, drcHost))
                 .setUsername(username)
                 .setClientId(clientId)
                 .setExpireTime(System.currentTimeMillis() / 1000 + age)
                 .setPassword(token)
                 .setEnableTls(false);
+    }
+
+    private static String getMqttAddressWithHost(MqttClientOptions options, String host) {
+        StringBuilder addr = new StringBuilder()
+                .append(options.getProtocol().getProtocolAddr())
+                .append(host.trim())
+                .append(":")
+                .append(options.getPort());
+        if ((options.getProtocol() == MqttProtocolEnum.WS || options.getProtocol() == MqttProtocolEnum.WSS)
+                && StringUtils.hasText(options.getPath())) {
+            addr.append(options.getPath());
+        }
+        return addr.toString();
     }
 
 

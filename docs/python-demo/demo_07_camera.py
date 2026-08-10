@@ -9,6 +9,7 @@ demo_07_camera.py —— 拍照 / 开始录像 / 停止录像
 import sys
 import requests
 from config import BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG, DOCK_SN, PAYLOAD_INDEX
+from demo_common import diagnose
 
 if DOCK_SN == "YOUR_DOCK_SN":
     print("[✗] 请先在 config.py 中设置 DOCK_SN")
@@ -27,7 +28,9 @@ def seize_payload_authority(token):
                          json={"payload_index": PAYLOAD_INDEX},
                          timeout=10)
     result = resp.json()
-    print(f"[{'✓' if result.get('code')==0 else '!'}] 抢占负载控制权")
+    if result.get("code") != 0:
+        diagnose(token, "抢占负载控制权", result.get("message", ""))
+    print("[✓] 已获取负载控制权")
 
 def send_payload_cmd(token, cmd: str, extra: dict = None):
     url = f"{BASE_URL}/control/api/v1/devices/{DOCK_SN}/payload/commands"
@@ -44,7 +47,11 @@ def send_payload_cmd(token, cmd: str, extra: dict = None):
     result = resp.json()
 
     ok = result.get("code") == 0
-    print(f"[{'✓' if ok else '✗'}] {result.get('message', result)}")
+    if ok:
+        print(f"[✓] {result.get('message', 'success')}")
+    else:
+        # 单条指令失败时打印诊断但不退出，后续指令仍可继续尝试
+        diagnose(token, f"指令 {cmd}", result.get("message", str(result)), exit_on_error=False)
     return result
 
 if __name__ == "__main__":

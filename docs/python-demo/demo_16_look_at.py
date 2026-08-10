@@ -36,6 +36,7 @@ import sys
 import requests
 from config import (BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG,
                     DOCK_SN, PAYLOAD_INDEX)
+from demo_common import diagnose
 
 if DOCK_SN == "YOUR_DOCK_SN":
     print("[✗] 请先在 config.py 中设置 DOCK_SN")
@@ -65,8 +66,7 @@ def seize_payload_authority(token) -> bool:
     if result.get("code") == 0:
         print(f"[✓] 已抢夺负载控制权 (payload_authority_grab) 负载={PAYLOAD_INDEX}")
         return True
-    print(f"[✗] 抢夺负载控制权失败: {result.get('message', result)}")
-    return False
+    return diagnose(token, "抢夺负载控制权", result.get("message", str(result)))
 
 
 def camera_look_at(token, latitude: float, longitude: float, height: float) -> bool:
@@ -88,7 +88,10 @@ def camera_look_at(token, latitude: float, longitude: float, height: float) -> b
                          timeout=15)
     result = resp.json()
     ok = result.get("code") == 0
-    print(f"[{'✓' if ok else '✗'}] {result.get('message', result)}")
+    if ok:
+        print(f"[✓] {result.get('message', 'success')}")
+    else:
+        diagnose(token, "camera_look_at", result.get("message", str(result)), exit_on_error=False)
     return ok
 
 

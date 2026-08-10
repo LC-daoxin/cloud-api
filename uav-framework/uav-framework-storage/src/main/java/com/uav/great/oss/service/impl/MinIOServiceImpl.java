@@ -25,7 +25,13 @@ import java.util.Objects;
 public class MinIOServiceImpl implements IOssService {
 
     private MinioClient client;
-    
+
+    /**
+     * 对外预览客户端：预签名 URL 会下发给外部设备/Pilot App，
+     * 其 host 必须使用 external-endpoint（配置未设置时与内部 endpoint 相同）。
+     */
+    private MinioClient externalClient;
+
     @Override
     public OssTypeEnum getOssType() {
         return OssTypeEnum.MINIO;
@@ -49,8 +55,9 @@ public class MinIOServiceImpl implements IOssService {
     @Override
     public URL getObjectUrl(String bucket, String objectKey) {
         try {
+            // 预签名 URL 下发给外部设备访问，host 使用对外端点（externalClient）
             return new URL(
-                    client.getPresignedObjectUrl(
+                    externalClient.getPresignedObjectUrl(
                                     GetPresignedObjectUrlArgs.builder()
                                             .method(Method.GET)
                                             .bucket(bucket)
@@ -109,10 +116,21 @@ public class MinIOServiceImpl implements IOssService {
         if (Objects.nonNull(this.client)) {
             return;
         }
+        // 内部读写客户端：走容器网络可访问的 endpoint（默认 compose 服务名）
         this.client = MinioClient.builder()
                 .endpoint(OssConfiguration.endpoint)
                 .credentials(OssConfiguration.accessKey, OssConfiguration.secretKey)
                 //.region(OssConfiguration.region)
                 .build();
+        // 预签名 URL 客户端：对外端点，未配置 external-endpoint 时与内部端点相同（复用同一实例即可）
+        String externalEndpoint = OssConfiguration.publicEndpoint();
+        if (externalEndpoint.equals(OssConfiguration.endpoint)) {
+            this.externalClient = this.client;
+        } else {
+            this.externalClient = MinioClient.builder()
+                    .endpoint(externalEndpoint)
+                    .credentials(OssConfiguration.accessKey, OssConfiguration.secretKey)
+                    .build();
+        }
     }
 }

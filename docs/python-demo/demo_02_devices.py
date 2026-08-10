@@ -9,27 +9,7 @@ demo_02_devices.py -- 查询在线设备列表，获取遥控器/无人机 SN �
 import requests
 import json
 from config import BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG, WORKSPACE_ID, SERVER_IP
-
-
-def check_device_online(sn: str) -> bool:
-    """通过 HTTP 接口间接判断设备是否在线：查询直播能力返回为空则不在线"""
-    # 直接用 Redis HTTP 不可达，改用应用层逻辑判断
-    # 设备拓扑接口返回的 bound_status 是绑定状态，不是在线状态
-    # 真正在线状态只能从 Redis 或 WebSocket 推送获取
-    # 这里用拓扑接口的 login_time 近似判断：有 login_time 说明连过，但不代表当前在线
-    return False
-
-
-def check_online_via_redis(sn: str) -> bool:
-    """通过 docker exec redis-cli 查询设备在线 key"""
-    import subprocess
-    try:
-        r = subprocess.run(
-            ["docker", "exec", "uav-redis", "redis-cli", "exists", f"online:{sn}"],
-            capture_output=True, text=True, timeout=5)
-        return r.stdout.strip() == "1"
-    except Exception:
-        return False
+from demo_common import check_online_via_redis
 
 
 def get_token():
@@ -58,7 +38,7 @@ def get_devices(token):
         sn = d.get("device_sn", "")
         domain = domain_map.get(d.get("domain"), str(d.get("domain")))
         child = d.get("child_device_sn", "") or ""
-        # 真正在线状态：查 Redis device_online:{sn} key
+        # 真正在线状态：查 Redis online:{sn} key（应用侧 60 秒无心跳刷新即过期）
         is_online = check_online_via_redis(sn)
         online_str = "✓ 在线" if is_online else "○ 离线"
         print(f"{sn:<32} {domain:<8} {child:<24} {online_str}")
@@ -102,9 +82,18 @@ def get_devices(token):
         print(f"\n[✓] 在线设备直播能力（可获取 payload_index）")
         for dev in live_data:
             print(f"\n  设备 SN: {dev.get('sn')}")
-            for cam in dev.get("camerasList", []):
-                print(f"    摄像头: {cam.get('payload_index')} | 类型: {cam.get('camera_type')}")
-                print(f"    -> 填入 config.py PAYLOAD_INDEX = \"{cam.get('payload_index')}\"")
+            # 兼容两种字段格式：cameras_list（Cloud-API 实际返回）/ camerasList（旧格式）
+            cameras = dev.get("cameras_list") or dev.get("camerasList") or []
+            for cam in cameras:
+                # Cloud-API 返回 index；旧版本返回 payload_index
+                index = cam.get("index") or cam.get("payload_index")
+                name = cam.get("name") or cam.get("camera_type", "")
+                # 镜头列表在 videos_list[].type
+                videos = cam.get("videos_list") or cam.get("videosList") or []
+                lens = [v.get("type") for v in videos if v.get("type")]
+                lens_str = f" 镜头: {','.join(lens)}" if lens else ""
+                print(f"    摄像头: {index} | {name}{lens_str}")
+                print(f"    -> 填入 config.py PAYLOAD_INDEX = \"{index}\"")
     else:
         print(f"\n[!] 直播能力为空（设备未上报 capability）")
         print(f"    PAYLOAD_INDEX 只能从 OSD 数据获取：")

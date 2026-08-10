@@ -12,6 +12,7 @@ demo_05_gimbal_zoom.py -- 云台变焦（camera_focal_length_set）
 """
 import requests
 from config import BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG, DOCK_SN, PAYLOAD_INDEX
+from demo_common import diagnose
 
 if DOCK_SN == "YOUR_DOCK_SN":
     import sys
@@ -38,7 +39,7 @@ def seize_payload_authority(token):
     if result.get("code") == 0:
         print("[✓] 已获取负载控制权")
     else:
-        print(f"[!] 抢权结果: {result}（已拥有控制权时可忽略）")
+        diagnose(token, "抢占负载控制权", result.get("message", str(result)))
 
 def zoom(token, zoom_factor: float):
     """设置变焦倍率"""
@@ -62,7 +63,7 @@ def zoom(token, zoom_factor: float):
     if result.get("code") == 0:
         print(f"[✓] 变焦成功，当前倍率: {zoom_factor}x")
     else:
-        print(f"[✗] 变焦失败: {result}")
+        diagnose(token, "变焦指令", result.get("message", str(result)), exit_on_error=False)
 
     return result
 

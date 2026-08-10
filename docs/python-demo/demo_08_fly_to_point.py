@@ -40,6 +40,7 @@ import requests
 import paho.mqtt.client as mqtt
 from config import (BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG, DOCK_SN,
                     MQTT_HOST, MQTT_PORT, MQTT_USERNAME, MQTT_PASSWORD)
+from demo_common import diagnose
 
 if DOCK_SN == "YOUR_DOCK_SN":
     print("[✗] 请先在 config.py 中设置 DOCK_SN")
@@ -78,8 +79,7 @@ def seize_flight_authority(token) -> bool:
     if result.get("code") == 0:
         print("[✓] 已抢夺飞行控制权 (flight_authority_grab)")
         return True
-    print(f"[✗] 抢夺飞行控制权失败: {result.get('message', result)}")
-    return False
+    return diagnose(token, "抢夺飞行控制权", result.get("message", str(result)))
 
 
 class FlyToProgressWatcher:
@@ -201,7 +201,7 @@ def fly_to_point(token) -> bool:
     if result.get("code") == 0:
         print("[✓] 飞向目标点指令已下发")
         return True
-    print(f"[✗] 失败: {result}")
+    diagnose(token, "飞向目标点", result.get("message", str(result)), exit_on_error=False)
     return False
 
 
@@ -210,7 +210,10 @@ def stop_fly_to_point(token):
     url = f"{BASE_URL}/control/api/v1/devices/{DOCK_SN}/jobs/fly-to-point"
     resp = requests.delete(url, headers={"x-auth-token": token}, timeout=10)
     result = resp.json()
-    print(f"[{'✓' if result.get('code') == 0 else '✗'}] 停止指令: {result.get('message', result)}")
+    if result.get("code") == 0:
+        print(f"[✓] 停止指令: {result.get('message', 'success')}")
+    else:
+        diagnose(token, "停止飞向目标点", result.get("message", str(result)), exit_on_error=False)
 
 
 if __name__ == "__main__":

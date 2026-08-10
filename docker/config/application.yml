@@ -44,13 +44,18 @@ jwt:
 mqtt:
   BASIC:
     protocol: MQTT
-    # BROKER_HOST 既是应用容器连接 Broker 用的地址，也是登录接口返回给 Pilot App 的 mqtt_addr。
-    # 单机 Docker Compose（bridge 网络）默认用服务名 mqtt；
-    # 独立节点（如 Jetson Nano + host network）部署时需通过 .env 设为该节点的固定局域网 IP
+    # 应用自身连接 Broker 的地址（容器内部）。
+    # 单机 Docker Compose（bridge网络）用服务名 mqtt，不需要改；
+    # Jetson Nano host-network 部署由 compose 直接注入节点局域网 IP。
     # 注意：变量名不能以 MQTT_ 开头，Spring Boot 会把 MQTT_XXX 松散绑定成 mqtt.xxx，
     # 与此处 mqtt 节点本身被绑定为 Map<MqttUseEnum,...> 冲突，导致启动失败
     host: ${BROKER_HOST:mqtt}
     port: ${BROKER_PORT:1883}
+    # 登录接口返回给外部设备（Pilot App / 遥控器 / 无人机）的对外地址。
+    # 桥接网络下容器无法回头访问宿主机 IP，内外地址必须分开配置：
+    # 本地 Mac Docker Desktop 通过 .env 的 MQTT_HOST=<局域网IP> 注入。
+    # 未配置时回退为上面的 host（与旧行为一致）。
+    external-host: ${BROKER_EXTERNAL_HOST:}
     username: uav_cloud_service
     password: any
     client-id: cloud_service_local
@@ -59,6 +64,7 @@ mqtt:
     protocol: WSS
     host: ${BROKER_HOST:mqtt}
     port: ${BROKER_DRC_PORT:9001}
+    external-host: ${BROKER_EXTERNAL_HOST:}
     path: /mqtt
     username: cc_server
     password: any
@@ -90,10 +96,12 @@ url:
 oss:
   enable: true
   provider: minio
-  # OSS_ENDPOINT：应用与 MinIO 交互、以及生成航线/媒体文件预签名 URL 时使用的地址。
-  # 单机 Docker Compose 默认走容器内部服务名 minio:9000；
-  # 独立节点部署且预签名 URL 需要被外部设备/Pilot App 访问时，需通过 .env 设为该节点固定局域网 IP + 对外映射端口（如 http://192.168.3.1:9100）
+  # OSS_ENDPOINT：应用自身访问 MinIO 的地址（容器内部，默认走服务名 minio）。
+  # OSS_EXTERNAL_ENDPOINT：下发给外部设备的预签名 URL / STS endpoint 使用的对外地址，
+  # 需为外部设备可访问的地址（如 http://192.168.3.1:9100）；
+  # 未配置时回退为 endpoint，与旧行为一致。
   endpoint: ${OSS_ENDPOINT:http://minio:9000}
+  external-endpoint: ${OSS_EXTERNAL_ENDPOINT:}
   access-key: ${OSS_ACCESS_KEY:minioadmin}
   secret-key: ${OSS_SECRET_KEY:minioadmin}
   bucket: uav-store

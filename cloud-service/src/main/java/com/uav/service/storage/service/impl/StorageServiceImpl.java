@@ -23,7 +23,8 @@ public class StorageServiceImpl extends AbstractMediaService implements IStorage
     @Override
     public StsCredentialsResponse getSTSCredentials() {
         return new StsCredentialsResponse()
-                .setEndpoint(OssConfiguration.endpoint)
+                // endpoint 随凭据下发给外部设备，用于直传/下载，必须使用对外端点
+                .setEndpoint(OssConfiguration.publicEndpoint())
                 .setBucket(OssConfiguration.bucket)
                 .setCredentials(ossService.getCredentials())
                 .setProvider(OssConfiguration.provider)

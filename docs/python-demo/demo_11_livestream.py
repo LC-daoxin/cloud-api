@@ -23,7 +23,6 @@ RTSP 发布/拉流地址格式（MediaMTX 动态路径）：
 """
 import sys
 import json
-import os
 import shutil
 import subprocess
 import time
@@ -40,7 +39,6 @@ VIDEO_QUALITY = 2     # 默认标清更流畅；可在菜单中切换到 3=高�
 RTSP_USERNAME = "admin"
 RTSP_PASSWORD = "admin"
 RTSP_PORT = 8554
-VLC_APP = "/Applications/VLC.app/Contents/MacOS/VLC"
 
 
 def get_token():
@@ -117,6 +115,14 @@ def build_rtsp_url(video_id: str) -> str:
     return f"rtsp://{RTSP_USERNAME}:{RTSP_PASSWORD}@{SERVER_IP}:{RTSP_PORT}/{stream_name}"
 
 
+def build_rtsp_playback_url(video_id: str) -> str:
+    """不带账号密码的拉流地址（展示/播放提示用，避免在终端泄露凭据）"""
+    parts = video_id.split("/")
+    drone_sn = parts[0] if len(parts) > 0 else "unknown"
+    payload_index = parts[1] if len(parts) > 1 else "0-0-0"
+    return f"rtsp://{SERVER_IP}:{RTSP_PORT}/{drone_sn}-{payload_index}"
+
+
 def parse_video_type(video_id: str) -> str:
     """从 video_id（如 drone_sn/payload_index/zoom-0）中解析出当前镜头类型。"""
     parts = video_id.split("/")
@@ -191,11 +197,11 @@ def live_start(token, video_id: str, url_type: int = 2, video_quality: int = 3,
         if url_type == 2:
             live_data = result.get("data") or {}
             rtsp_url = live_data.get("url") or build_rtsp_url(video_id)
+            playback_url = build_rtsp_playback_url(video_id)
             print(f"    RTSP 拉流地址: {rtsp_url}")
-            print(f"    可用 ffplay 播放: ffplay -rtsp_transport tcp \"{rtsp_url}\"")
-            print("    VLC 低延迟播放: "
-                  f"open -na VLC --args --rtsp-tcp --network-caching=150 "
-                  f"--clock-synchro=0 --clock-jitter=0 \"{rtsp_url}\"")
+            print(f"    可用 ffplay 播放: ffplay -rtsp_transport tcp -fflags nobuffer+discardcorrupt "
+                  f"-flags low_delay -avioflags direct -probesize 32 -sync ext -framedrop "
+                  f"-vf setpts=0 \"{playback_url}\"")
             print("    正在等待首帧并检查实际媒体流...")
             probe_rtsp(rtsp_url)
         # 也打印接口返回的 URL（如果有）
@@ -226,20 +232,6 @@ def ensure_rtsp_live(token, video_id: str) -> str | None:
     # live_start 已做一次首帧探测；这里再次确认发布者仍在线，避免把
     # 设备的“指令成功”误报成可播放。
     return rtsp_url if probe_rtsp(rtsp_url, timeout_sec=6) else None
-
-
-def open_vlc(rtsp_url: str) -> bool:
-    """启动独立 VLC 实例，确保 TCP 参数不会被已有 VLC 进程忽略。"""
-    if not os.path.isfile(VLC_APP):
-        print(f"[✗] 未找到 VLC: {VLC_APP}")
-        return False
-    subprocess.Popen([VLC_APP, "--rtsp-tcp", "--network-caching=150",
-                      "--clock-synchro=0", "--clock-jitter=0",
-                      "--no-video-title-show", rtsp_url],
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                     start_new_session=True)
-    print(f"[✓] 已启动 VLC: {rtsp_url}")
-    return True
 
 
 def live_stop(token, video_id: str):
@@ -360,7 +352,6 @@ if __name__ == "__main__":
     print("  2. 停止直播")
     print("  3. 切换清晰度（2=标清 3=高清）")
     print("  4. 切换镜头（zoom/ir）")
-    print("  5. 启动直播并用低延迟 VLC 播放")
     print("  6. 开始直播，若4秒无首帧则临时切镜头强制恢复（与前端 CockpitView 逻辑一致）")
     print("  q. 退出\n")
 
@@ -378,10 +369,6 @@ if __name__ == "__main__":
         elif cmd == "4":
             lens = input("  镜头类型(zoom/ir): ").strip()
             live_switch_lens(token, selected, lens)
-        elif cmd == "5":
-            rtsp_url = ensure_rtsp_live(token, selected)
-            if rtsp_url:
-                open_vlc(rtsp_url)
         elif cmd == "6":
             live_start_recover_by_lens_switch(token, selected)
         else:

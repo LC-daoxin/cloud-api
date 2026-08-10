@@ -115,8 +115,9 @@ services:
     environment:
       - JAVA_OPTS=-Xms256m -Xmx768m -XX:MaxMetaspaceSize=256m -XX:+UseG1GC
       - TZ=Asia/Shanghai
-      # 以下变量均由 docker/config/application.yml 中的 ${VAR:default} 占位符读取；
-      # 单机部署留空即可（沿用 default），多节点独立部署通过 .env 覆盖
+      # 以下变量均由 docker/config/application.yml 中的 ${VAR:default} 占位符读取。
+      # 桥接网络（本文件）下应用容器连接各依赖一律使用 compose 服务名，不通过 .env 修改；
+      # 需要对外（Pilot App / 遥控器 / 无人机）暴露的地址使用 *_EXTERNAL / MQTT_HOST 单独配置。
       - DB_HOST=${DB_HOST:-mysql}
       - DB_PORT=${DB_PORT:-3306}
       - DB_NAME=${DB_NAME:-cloud_sample}
@@ -125,10 +126,17 @@ services:
       - REDIS_HOST=${REDIS_HOST:-redis}
       - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
-      - BROKER_HOST=${MQTT_HOST:-mqtt}
+      # 内部地址：固定为 compose 服务名。桥接网络下容器无法回头访问宿主机 IP，
+      # 不要把这里改成局域网 IP，否则 app 连不上 MQTT/OSS
+      - BROKER_HOST=mqtt
       - BROKER_PORT=${MQTT_PORT:-1883}
       - BROKER_DRC_PORT=${MQTT_DRC_PORT:-9001}
-      - OSS_ENDPOINT=${OSS_ENDPOINT:-http://minio:9000}
+      - OSS_ENDPOINT=http://minio:9000
+      # 对外地址：登录接口回传给设备的 mqtt_addr / 预签名 URL 使用；
+      # 本地 Mac 开发在 .env 中设 MQTT_HOST=<局域网IP> 和 OSS_EXTERNAL_ENDPOINT=http://<IP>:9100。
+      # 留空则回退为内部地址（仅容器内可达）
+      - BROKER_EXTERNAL_HOST=${MQTT_HOST:-}
+      - OSS_EXTERNAL_ENDPOINT=${OSS_EXTERNAL_ENDPOINT:-}
       - OSS_ACCESS_KEY=${OSS_ACCESS_KEY:-minioadmin}
       - OSS_SECRET_KEY=${OSS_SECRET_KEY:-minioadmin}
       - JWT_SECRET=${JWT_SECRET:-dev-local-secret-replace-in-production-32chars}

@@ -12,6 +12,7 @@ demo_06_gimbal_pitch.py -- 云台控制（camera_aim 指点 + camera_screen_drag
 import sys
 import requests
 from config import BASE_URL, WEB_USERNAME, WEB_PASSWORD, WEB_FLAG, DOCK_SN, PAYLOAD_INDEX
+from demo_common import diagnose
 
 if DOCK_SN == "YOUR_DOCK_SN":
     print("[✗] 请先在 config.py 中设置 DOCK_SN，运行 demo_02_devices.py 可查看设备 SN")
@@ -43,8 +44,7 @@ def seize_payload_authority(token):
                          timeout=10)
     result = resp.json()
     if result.get("code") != 0:
-        print(f"[✗] 抢占负载控制权失败: {result.get('message', '')}\n    请确认设备和无人机均已上线")
-        sys.exit(1)
+        diagnose(token, "抢占负载控制权", result.get("message", ""))
     print("[✓] 已获取负载控制权")
 
 

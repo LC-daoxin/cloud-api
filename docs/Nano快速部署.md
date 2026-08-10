@@ -3,17 +3,18 @@
 本文用于在全新的 64 位 Jetson Nano 上部署 Cloud-API。后端镜像在 Apple Silicon Mac 上构建，
 再通过局域网或 U 盘传输到 Nano；Nano 只负责加载镜像和运行 Docker Compose，不执行 Maven 编译。
 
-适用仓库：
+适用仓库（Public 仓库，克隆无需密钥，推荐 HTTPS）：
 
 ```text
-git@github.com:LC-daoxin/cloud-api.git
+https://github.com/LC-daoxin/cloud-api.git
+git@github.com:LC-daoxin/cloud-api.git   （SSH 只读同样可用）
 ```
 
 本文以以下环境为例，实际使用时请替换 Nano 用户名、IP 和目录：
 
 ```text
 开发机：          Apple Silicon Mac
-新 Nano：         jetson@192.168.3.1
+新 Nano：         jetson@172.20.10.3（Jetson 1）
 Nano 部署目录：   /home/jetson/1_projects/cloud-api
 应用镜像：        uav-cloud-api-app:nano1-<Git提交短号>
 ```
@@ -118,55 +119,65 @@ linux/arm64
 检查 Nano：
 
 ```bash
-ssh jetson@192.168.3.1 'uname -m && docker version && docker compose version && df -h /'
+ssh jetson@172.20.10.3 'uname -m && docker version && docker compose version && df -h /'
 ```
 
 如果输出 `armv7l`，说明系统为 32 位，不能运行本文构建的 ARM64 镜像。
 
-## 4. 配置私有仓库访问
+## 4. 配置仓库访问
 
-如果仓库为私有仓库，推荐每台 Nano 使用独立的只读 Deploy Key。
+`git@github.com:LC-daoxin/cloud-api.git` 是 SSH 克隆地址。本仓库为 **Public** 仓库，
+克隆只需要**读取**权限，无需配置任何 SSH Key / Deploy Key / Token。
 
-在 Nano 上执行：
+如果 Nano 后续需要把本地修改推送回远端（一般部署场景不需要），再另行配置
+GitHub Push 权限；推送场景不在本文范围内。
 
-```bash
-ssh jetson@192.168.3.1
-mkdir -p ~/.ssh
-chmod 700 ~/.ssh
-
-ssh-keygen \
-  -t ed25519 \
-  -f ~/.ssh/id_ed25519_cloud_api \
-  -N "" \
-  -C 'jetson@nano1 cloud-api'
-
-chmod 600 ~/.ssh/id_ed25519_cloud_api
-chmod 644 ~/.ssh/id_ed25519_cloud_api.pub
-cat ~/.ssh/id_ed25519_cloud_api.pub
-```
-
-把公钥添加到 GitHub 仓库：
+以下步骤针对：
 
 ```text
-Settings → Deploy keys → Add deploy key
+Nano 地址：172.20.10.3
+Nano 用户：jetson
+目标目录：/home/jetson/1_projects/cloud-api
 ```
 
-- Title：例如 `cloud-api-nano1`
-- Key：粘贴公钥
-- 不勾选 `Allow write access`
+### 4.1 从 Mac 登录并检查 Jetson 1
 
-测试：
+在 Mac 终端执行：
 
 ```bash
-ssh \
-  -T \
-  -i ~/.ssh/id_ed25519_cloud_api \
-  -o IdentitiesOnly=yes \
-  git@github.com
+ping -c 3 172.20.10.3
+ssh -o StrictHostKeyChecking=accept-new jetson@172.20.10.3
 ```
 
-GitHub 显示 `successfully authenticated` 即表示成功。GitHub 不提供 SSH Shell，因此成功测试也可能返回
-退出码 `1`。
+登录后确认用户、主目录和架构：
+
+```bash
+whoami
+pwd
+uname -m
+```
+
+预期结果分别为 `jetson`、`/home/jetson` 和 `aarch64`。
+
+### 4.2 准备目录并验证仓库可访问
+
+以下命令在 Jetson 1 上执行。`git ls-remote` 只查询远端引用，不产生本地文件，
+用于确认网络和仓库地址可用：
+
+```bash
+mkdir -p ~/1_projects
+git ls-remote https://github.com/LC-daoxin/cloud-api.git HEAD
+```
+
+预期输出为一行提交哈希。如果 Nano 无法访问 HTTPS（防火墙等），改用 SSH 方式
+（无需任何 Key，Public 仓库只读）：
+
+```bash
+GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new' \
+  git ls-remote git@github.com:LC-daoxin/cloud-api.git HEAD
+```
+
+> 后续第 8 节克隆时与这里使用同一种协议即可，两种方式均可，任选一种。
 
 ## 5. Mac 上构建应用镜像
 
@@ -217,7 +228,7 @@ chmod 600 .env.nano1
 
 ```dotenv
 COMPOSE_PROJECT_NAME=cloud-api
-NODE_LAN_IP=192.168.3.1
+NODE_LAN_IP=172.20.10.3
 APP_IMAGE=uav-cloud-api-app:nano1-<Git提交短号>
 
 DB_NAME=cloud_sample
@@ -286,9 +297,9 @@ ls -lh "/tmp/cloud-api-${CLOUD_API_VERSION}.tar.gz"
 ```bash
 scp \
   "/tmp/cloud-api-${CLOUD_API_VERSION}.tar.gz" \
-  jetson@192.168.3.1:/tmp/
+  jetson@172.20.10.3:/tmp/
 
-scp .env.nano1 jetson@192.168.3.1:/tmp/.env.cloud-api
+scp .env.nano1 jetson@172.20.10.3:/tmp/.env.cloud-api
 ```
 
 局域网速度较慢时，可以通过 U 盘传输镜像包。
@@ -313,7 +324,7 @@ docker save \
   -o /tmp/cloud-api-thirdparty-arm64.tar
 
 gzip -f /tmp/cloud-api-thirdparty-arm64.tar
-scp /tmp/cloud-api-thirdparty-arm64.tar.gz jetson@192.168.3.1:/tmp/
+scp /tmp/cloud-api-thirdparty-arm64.tar.gz jetson@172.20.10.3:/tmp/
 ```
 
 Nano 上加载：
@@ -329,25 +340,57 @@ gunzip -c /tmp/cloud-api-thirdparty-arm64.tar.gz | docker load
 
 ### 8.1 克隆仓库
 
+本仓库为 Public 仓库，直接使用 HTTPS 克隆即可，无需任何密钥：
+
 ```bash
-ssh jetson@192.168.3.1
-mkdir -p /home/jetson/1_projects
-cd /home/jetson/1_projects
+ssh jetson@172.20.10.3
+mkdir -p ~/1_projects
+cd ~/1_projects
 
-GIT_SSH_COMMAND='ssh -i /home/jetson/.ssh/id_ed25519_cloud_api -o IdentitiesOnly=yes' \
-  git clone \
-  git@github.com:LC-daoxin/cloud-api.git \
-  cloud-api
+if [ -e ~/1_projects/cloud-api ]; then
+  echo '目标目录已存在，停止克隆并先检查目录内容'
+else
+  git clone https://github.com/LC-daoxin/cloud-api.git cloud-api
+fi
+```
 
-cd /home/jetson/1_projects/cloud-api
-git config core.sshCommand \
-  'ssh -i /home/jetson/.ssh/id_ed25519_cloud_api -o IdentitiesOnly=yes'
+> 如果 Nano 无法访问 HTTPS（防火墙等），也可以在第 4.2 节用
+> `GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new'` 配合 SSH 地址克隆，
+> Public 仓库只读同样无需密钥。
+
+只有看到 `Cloning into 'cloud-api'...` 且克隆正常完成后，再执行：
+
+```bash
+cd ~/1_projects/cloud-api
 
 git remote -v
 git branch --show-current
 git log -1 --oneline
 git status --short
+git ls-remote origin HEAD
 ```
+
+预期：
+
+- 目录为 `/home/jetson/1_projects/cloud-api`。
+- `origin` 指向 `https://github.com/LC-daoxin/cloud-api.git`（SSH 方式则为 `git@github.com:...`）。
+- 当前分支通常为 `main`。
+- `git status --short` 没有输出。
+- `git ls-remote origin HEAD` 返回一行提交哈希。
+
+不要使用 `sudo git clone`，否则仓库文件会属于 `root`，后续使用 `jetson` 用户执行 `git pull` 会出现
+权限错误。
+
+如果 `~/1_projects/cloud-api` 已经存在且是 Git 仓库，不要再次克隆：
+
+```bash
+cd ~/1_projects/cloud-api
+git status --short
+git remote -v
+git pull --ff-only
+```
+
+如果目录存在但不是 Git 仓库，先检查里面是否有需要保留的文件，不要直接覆盖或删除。
 
 ### 8.2 加载应用镜像
 
@@ -520,7 +563,7 @@ YOOX_Cloud_GCS 继续使用相同登录密码，需要分别登录两个系统�
 在运行 Demo 的电脑上修改 `docs/python-demo/config.py`：
 
 ```python
-SERVER_IP = "192.168.3.1"
+SERVER_IP = "172.20.10.3"
 SERVER_PORT = 9000
 ```
 
@@ -534,7 +577,7 @@ python3 demo_01_login.py
 重点检查：
 
 - Web 和 Pilot 两种账号都能登录。
-- `mqtt_addr` 为 `tcp://192.168.3.1:1883`，不能是 `mqtt`、`localhost` 或 `127.0.0.1`。
+- `mqtt_addr` 为 `tcp://172.20.10.3:1883`，不能是 `mqtt`、`localhost` 或 `127.0.0.1`。
 - 返回的 `workspace_id` 与初始化工作空间一致。
 - 后续 Demo 使用刚获得的 token，不要复用另一个项目签发的 token。
 
@@ -546,14 +589,14 @@ Cloud-API 与 YOOX_Cloud_GCS 的用户名和登录密码可以保持一致，但
 在局域网另一台机器上执行：
 
 ```bash
-nc -zv 192.168.3.1 9000
-nc -zv 192.168.3.1 1883
-nc -zv 192.168.3.1 9001
-nc -zv 192.168.3.1 8554
-nc -zv 192.168.3.1 9100
-nc -zv 192.168.3.1 8889
+nc -zv 172.20.10.3 9000
+nc -zv 172.20.10.3 1883
+nc -zv 172.20.10.3 9001
+nc -zv 172.20.10.3 8554
+nc -zv 172.20.10.3 9100
+nc -zv 172.20.10.3 8889
 
-curl -fsS http://192.168.3.1:9100/minio/health/live
+curl -fsS http://172.20.10.3:9100/minio/health/live
 ```
 
 ### 10.5 真机验收
@@ -588,13 +631,13 @@ docker save \
   -o "/tmp/cloud-api-${CLOUD_API_VERSION}.tar"
 
 gzip -f "/tmp/cloud-api-${CLOUD_API_VERSION}.tar"
-scp "/tmp/cloud-api-${CLOUD_API_VERSION}.tar.gz" jetson@192.168.3.1:/tmp/
+scp "/tmp/cloud-api-${CLOUD_API_VERSION}.tar.gz" jetson@172.20.10.3:/tmp/
 ```
 
 同步更新 `.env.nano1` 中的 `APP_IMAGE`，再传输：
 
 ```bash
-scp .env.nano1 jetson@192.168.3.1:/tmp/.env.cloud-api
+scp .env.nano1 jetson@172.20.10.3:/tmp/.env.cloud-api
 ```
 
 ### 11.2 Nano 侧
@@ -798,12 +841,75 @@ docker buildx build \
 
 跨架构构建速度明显慢于 Apple Silicon 原生构建。
 
+### 14.10 克隆失败 / `Could not resolve host`
+
+本仓库为 Public 仓库，克隆只需要网络和正确的地址，不涉及密钥。
+
+先确认 Nano 能否访问 GitHub：
+
+```bash
+curl -sI https://github.com/LC-daoxin/cloud-api | head -3
+```
+
+- 能返回 HTTP 状态码，直接用 HTTPS 克隆：
+  `git clone https://github.com/LC-daoxin/cloud-api.git cloud-api`
+- 若被防火墙屏蔽 HTTPS，改用 SSH（Public 仓库只读无需密钥）：
+
+```bash
+GIT_SSH_COMMAND='ssh -o StrictHostKeyChecking=accept-new' \
+  git clone git@github.com:LC-daoxin/cloud-api.git cloud-api
+```
+
+如果已经克隆过一次但远端地址不对，修正远端后重试：
+
+```bash
+git remote -v
+git remote set-url origin https://github.com/LC-daoxin/cloud-api.git
+```
+
+### 14.11 目标目录已存在或仓库属于 root
+
+出现下面错误时，不要删除目录后盲目重试：
+
+```text
+fatal: destination path 'cloud-api' already exists and is not an empty directory
+```
+
+先判断它是不是已经克隆完成的仓库：
+
+```bash
+cd ~/1_projects/cloud-api
+git rev-parse --is-inside-work-tree
+git remote -v
+git status --short
+```
+
+如果是正确仓库，直接更新：
+
+```bash
+git pull --ff-only
+```
+
+如果之前误用了 `sudo git clone`，检查文件归属：
+
+```bash
+ls -ld ~/1_projects/cloud-api ~/1_projects/cloud-api/.git
+```
+
+确认目标确实是当前 Cloud-API 仓库后，修复为当前 Jetson 用户：
+
+```bash
+sudo chown -R "$USER":"$(id -gn)" ~/1_projects/cloud-api
+```
+
+如果目录不是 Git 仓库，先检查并备份其中内容，再决定是否改名；不要直接递归删除。
+
 ## 15. 完成标准
 
 满足以下条件后才算部署完成：
 
 - Nano 为 `aarch64` 64 位系统。
-- GitHub 私有仓库只读认证通过。
+- Cloud-API 仓库已成功克隆（Public 仓库，HTTPS 或 SSH 只读均可）。
 - Cloud-API ARM64 镜像已成功加载。
 - `.env` 权限为 `600` 且被 Git 忽略。
 - `NODE_LAN_IP` 和 `APP_IMAGE` 正确。
