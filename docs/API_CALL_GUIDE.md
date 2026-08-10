@@ -143,7 +143,7 @@ curl -X POST "$BASE_URL/<upload-path>" \
   -F 'file=@/absolute/path/to/file.kmz'
 ```
 
-## 4. 管理与身份 API（6 个）
+## 4. 管理与身份 API（7 个）
 
 ### 4.1 接口清单
 
@@ -152,6 +152,7 @@ curl -X POST "$BASE_URL/<upload-path>" \
 | POST | `/manage/api/v1/login` | JSON `UserLoginDTO` | 登录，免鉴权 |
 | POST | `/manage/api/v1/token/refresh` | Header `x-auth-token` | 刷新 token，拦截器层面免鉴权但方法自行校验旧 token |
 | GET | `/manage/api/v1/users/current` | 无 | 当前用户信息 |
+| PUT | `/manage/api/v1/users/current/password` | JSON `ChangePasswordParam` | 修改当前用户密码 |
 | GET | `/manage/api/v1/users/{workspace_id}/users` | Query `page=1&page_size=50` | 工作空间用户分页列表 |
 | PUT | `/manage/api/v1/users/{workspace_id}/users/{user_id}` | JSON `UserListDTO` | 更新用户信息 |
 | GET | `/manage/api/v1/workspaces/current` | 无 | 当前工作空间信息 |
@@ -170,7 +171,17 @@ curl -X POST "$BASE_URL/manage/api/v1/login" \
   -d '{"username":"pilot","password":"pilot123","flag":2}'
 ```
 
-### 4.3 更新用户请求
+### 4.3 修改当前用户密码
+
+新密码长度为 12–72 位，且必须同时包含大写字母、小写字母、数字和特殊字符。
+
+```bash
+curl -X PUT "$BASE_URL/manage/api/v1/users/current/password" \
+  -H "x-auth-token: $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"old_password":"当前密码","new_password":"Example@Strong2026"}'
+```
+
+### 4.4 更新用户请求
 
 `UserListDTO` 可接受字段为 `userId`、`username`、`workspaceName`、`userType`、`mqttUsername`、`mqttPassword`、`createTime`。实际更新时应只提交服务允许修改的字段，例如：
 

@@ -293,7 +293,7 @@ mysql -h <MYSQL_HOST> -P 3306 -u uav_cloud -p \
   -e "USE cloud_sample; SHOW TABLES;"
 ```
 
-脚本包含演示用户，且当前登录逻辑使用明文密码比较。演示账号只能用于首次联调，生产上线前必须修改数据库密码并规划密码哈希改造。
+脚本包含演示用户，登录密码使用 BCrypt 哈希保存。演示账号只能用于首次联调，生产上线前仍必须修改默认密码。Docker Compose 会在应用启动前执行 `sql/migrations/001_bcrypt_user_passwords.sql`，将已有数据卷中的默认明文密码升级为 BCrypt；其他遗留明文账号会在首次成功登录后自动升级。
 
 ## 8. 准备 Redis
 

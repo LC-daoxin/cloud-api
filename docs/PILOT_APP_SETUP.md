@@ -34,10 +34,14 @@ curl -sS http://<服务器IP>:9000/manage/api/v1/login \
 
 > **Pilot App 必须使用 `pilot` 账号（flag=2），使用 Web 账号 `admin` 会返回 `The account type does not match.` 错误。**
 
-账号信息存储于数据库 `manage_user` 表，如需修改密码：
+账号信息存储于数据库 `manage_user` 表，密码使用 BCrypt 哈希，不能再写入明文。登录后可调用
+`PUT /manage/api/v1/users/current/password` 修改当前账号密码，请求体为：
 
-```sql
-UPDATE manage_user SET password = '新密码' WHERE username = 'pilot';
+```json
+{
+  "old_password": "当前密码",
+  "new_password": "至少12位且包含大小写字母、数字和特殊字符"
+}
 ```
 
 ---
@@ -204,7 +208,7 @@ docker compose ps
 
 | 风险项 | 说明 | 处理方式 |
 |---|---|---|
-| 密码明文存储 | 数据库中密码未加密 | 改造登录逻辑，引入密码哈希（如 BCrypt）|
+| 遗留版本密码为明文 | 旧数据卷尚未执行迁移 | 执行 `sql/migrations/001_bcrypt_user_passwords.sql`；Docker Compose 部署会自动执行 |
 | 弱 JWT Secret | 当前 secret 为固定字符串 | 修改 `jwt.secret` 为足够长的随机值 |
 | MQTT 匿名访问 | Mosquitto 当前允许匿名 | 关闭匿名，启用密码文件或 ACL |
 | 绑定码过弱 | 默认绑定码为 `qwe` | 修改为强随机字符串 |

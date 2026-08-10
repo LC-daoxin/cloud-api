@@ -23,10 +23,13 @@ import com.uav.service.manage.service.IUserService;
 import com.uav.service.manage.service.IWorkspaceService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -38,6 +41,8 @@ import java.util.stream.Collectors;
 @Service
 @Transactional
 public class UserServiceImpl implements IUserService {
+
+    private static final BCryptPasswordEncoder PASSWORD_ENCODER = new BCryptPasswordEncoder();
 
     @Autowired
     private IUserMapper mapper;
@@ -66,6 +71,9 @@ public class UserServiceImpl implements IUserService {
 
     @Override
     public HttpResultResponse userLogin(String username, String password, Integer flag) {
+        if (!StringUtils.hasText(username) || !StringUtils.hasText(password) || flag == null) {
+            return HttpResultResponse.error("Username, password and account type are required.");
+        }
         // check user
         UserEntity userEntity = this.getUserByUsername(username);
         if (userEntity == null) {
@@ -76,7 +84,7 @@ public class UserServiceImpl implements IUserService {
         if (flag.intValue() != userEntity.getUserType().intValue()) {
             return HttpResultResponse.error("The account type does not match.");
         }
-        if (!password.equals(userEntity.getPassword())) {
+        if (!passwordMatchesAndUpgrade(userEntity, password)) {
             return new HttpResultResponse()
                     .setCode(HttpStatus.UNAUTHORIZED.value())
                     .setMessage("invalid password");
@@ -160,6 +168,28 @@ public class UserServiceImpl implements IUserService {
         return id > 0;
     }
 
+    @Override
+    public void changePassword(String username, String oldPassword, String newPassword) {
+        UserEntity userEntity = this.getUserByUsername(username);
+        if (userEntity == null || !passwordMatchesAndUpgrade(userEntity, oldPassword)) {
+            throw new IllegalArgumentException("The current password is incorrect.");
+        }
+        boolean hasUpper = newPassword.chars().anyMatch(Character::isUpperCase);
+        boolean hasLower = newPassword.chars().anyMatch(Character::isLowerCase);
+        boolean hasDigit = newPassword.chars().anyMatch(Character::isDigit);
+        boolean hasSymbol = newPassword.chars().anyMatch(value -> !Character.isLetterOrDigit(value));
+        if (!(hasUpper && hasLower && hasDigit && hasSymbol)) {
+            throw new IllegalArgumentException(
+                    "The new password must contain uppercase, lowercase, digit and special characters.");
+        }
+        if (PASSWORD_ENCODER.matches(newPassword, userEntity.getPassword())) {
+            throw new IllegalArgumentException("The new password must differ from the current password.");
+        }
+        userEntity.setPassword(PASSWORD_ENCODER.encode(newPassword));
+        userEntity.setUpdateTime(System.currentTimeMillis());
+        mapper.updateById(userEntity);
+    }
+
     /**
      * Convert database entity objects into user data transfer object.
      * @param entity
@@ -185,6 +215,27 @@ public class UserServiceImpl implements IUserService {
     private UserEntity getUserByUsername(String username) {
         return mapper.selectOne(new QueryWrapper<UserEntity>()
                 .eq("username", username));
+    }
+
+    /**
+     * Accept legacy plaintext once so existing Docker volumes keep working,
+     * then immediately replace it with the same BCrypt representation used by
+     * YOOX_Cloud_GCS. Newly initialized databases never take this branch.
+     */
+    private boolean passwordMatchesAndUpgrade(UserEntity user, String rawPassword) {
+        String storedPassword = user.getPassword();
+        if (storedPassword != null && storedPassword.matches("^\\$2[aby]\\$.*")) {
+            return PASSWORD_ENCODER.matches(rawPassword, storedPassword);
+        }
+        if (storedPassword == null || !MessageDigest.isEqual(
+                rawPassword.getBytes(StandardCharsets.UTF_8),
+                storedPassword.getBytes(StandardCharsets.UTF_8))) {
+            return false;
+        }
+        user.setPassword(PASSWORD_ENCODER.encode(rawPassword));
+        user.setUpdateTime(System.currentTimeMillis());
+        mapper.updateById(user);
+        return true;
     }
 
     private UserDTO entityConvertToDTO(UserEntity entity) {

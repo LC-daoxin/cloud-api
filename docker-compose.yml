@@ -38,6 +38,22 @@ services:
       timeout: 5s
       retries: 10
 
+  account-migration:
+    image: mysql:8.0
+    restart: "no"
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      MYSQL_PWD: ${MYSQL_ROOT_PASSWORD:-devroot}
+      MYSQL_DATABASE: ${DB_NAME:-cloud_sample}
+    volumes:
+      - ./sql/migrations/001_bcrypt_user_passwords.sql:/migration.sql:ro
+    command:
+      - sh
+      - -c
+      - mysql -h mysql -u root "$${MYSQL_DATABASE}" < /migration.sql
+
   redis:
     image: redis:7-alpine
     container_name: uav-redis
@@ -88,6 +104,8 @@ services:
     depends_on:
       mysql:
         condition: service_healthy
+      account-migration:
+        condition: service_completed_successfully
       redis:
         condition: service_healthy
       mqtt:

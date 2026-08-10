@@ -311,7 +311,7 @@ CREATE TABLE `manage_user` (
   `id` int unsigned NOT NULL AUTO_INCREMENT,
   `user_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'uuid',
   `username` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'The name of the account.',
-  `password` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'The password of the account.',
+  `password` varchar(100) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'BCrypt password hash.',
   `workspace_id` varchar(64) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'Which workspace the current account belongs to.',
   `user_type` smallint NOT NULL COMMENT 'The type of account. Different sides need to be logged in with the corresponding type of account. 1: web; 2: pilot.',
   `mqtt_username` varchar(32) CHARACTER SET utf8 COLLATE utf8_general_ci NOT NULL DEFAULT '' COMMENT 'The account name used by the current account when logging into the emqx server.',
@@ -327,8 +327,8 @@ LOCK TABLES `manage_user` WRITE;
 
 INSERT INTO `manage_user` (`id`, `user_id`, `username`, `password`, `workspace_id`, `user_type`, `mqtt_username`, `mqtt_password`, `create_time`, `update_time`)
 VALUES
-	(1,'a1559e7c-8dd8-4780-b952-100cc4797da2','admin','Yoox@123456','e3dea0f5-37f2-4d79-ae58-490af3228069',1,'admin','admin',1634898410751,1650880112310),
-	(2,'be7c6c3d-afe9-4be4-b9eb-c55066c0914e','pilot','pilot123','e3dea0f5-37f2-4d79-ae58-490af3228069',2,'pilot','pilot123',1634898410751,1634898410751);
+	(1,'a1559e7c-8dd8-4780-b952-100cc4797da2','admin','$2y$10$Q5C62b4cUZz0Xu5essvKf.Vo4.CSTISI/q3YT69wK3iWmpF0WwEM.','e3dea0f5-37f2-4d79-ae58-490af3228069',1,'admin','admin',1634898410751,1650880112310),
+	(2,'be7c6c3d-afe9-4be4-b9eb-c55066c0914e','pilot','$2y$10$khXmgaop1Ha9DVC6Pr7il.81XKq.JsHsDvpdswAjXocufAT6JNuMG','e3dea0f5-37f2-4d79-ae58-490af3228069',2,'pilot','pilot123',1634898410751,1634898410751);
 
 /*!40000 ALTER TABLE `manage_user` ENABLE KEYS */;
 UNLOCK TABLES;

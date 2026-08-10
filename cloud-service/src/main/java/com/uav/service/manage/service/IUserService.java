@@ -13,6 +13,8 @@ public interface IUserService {
 
     HttpResultResponse userLogin(String username, String password, Integer flag);
 
+    void changePassword(String username, String oldPassword, String newPassword);
+
     Optional<UserDTO> refreshToken(String token);
 
     PaginationData<UserListDTO> getUsersByWorkspaceId(long page, long pageSize, String workspaceId);

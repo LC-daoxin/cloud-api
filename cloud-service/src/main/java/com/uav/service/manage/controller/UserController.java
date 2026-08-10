@@ -5,11 +5,13 @@ import com.uav.great.context.page.PaginationData;
 import com.uav.great.context.model.CustomClaim;
 import com.uav.great.context.web.core.AuthInterceptor;
 import com.uav.service.manage.model.dto.UserListDTO;
+import com.uav.service.manage.model.param.ChangePasswordParam;
 import com.uav.service.manage.service.IUserService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.web.bind.annotation.*;
 
 import javax.servlet.http.HttpServletRequest;
+import javax.validation.Valid;
 
 
 @RestController
@@ -23,6 +25,14 @@ public class UserController {
     public HttpResultResponse getCurrentUserInfo(HttpServletRequest request) {
         CustomClaim customClaim = (CustomClaim)request.getAttribute(AuthInterceptor.TOKEN_CLAIM);
         return userService.getUserByUsername(customClaim.getUsername(), customClaim.getWorkspaceId());
+    }
+
+    @PutMapping("/current/password")
+    public HttpResultResponse changeCurrentPassword(HttpServletRequest request,
+                                                    @Valid @RequestBody ChangePasswordParam param) {
+        CustomClaim customClaim = (CustomClaim) request.getAttribute(AuthInterceptor.TOKEN_CLAIM);
+        userService.changePassword(customClaim.getUsername(), param.getOldPassword(), param.getNewPassword());
+        return HttpResultResponse.success();
     }
 
     @GetMapping("/{workspace_id}/users")
