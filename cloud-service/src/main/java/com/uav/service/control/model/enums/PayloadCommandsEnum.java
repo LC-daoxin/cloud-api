@@ -21,6 +21,8 @@ public enum PayloadCommandsEnum {
 
     CAMERA_FOCAL_LENGTH_SET(PayloadControlMethodEnum.CAMERA_FOCAL_LENGTH_SET, CameraFocalLengthSetImpl.class),
 
+    CAMERA_SCREEN_DRAG(PayloadControlMethodEnum.CAMERA_SCREEN_DRAG, CameraScreenDragImpl.class),
+
     GIMBAL_RESET(PayloadControlMethodEnum.GIMBAL_RESET, GimbalResetImpl.class),
 
     CAMERA_LOOK_AT(PayloadControlMethodEnum.CAMERA_LOOK_AT, CameraLookAtImpl.class);

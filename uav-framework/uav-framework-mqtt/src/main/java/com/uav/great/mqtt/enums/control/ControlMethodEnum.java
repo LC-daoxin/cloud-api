@@ -32,6 +32,8 @@ public enum ControlMethodEnum {
 
     CAMERA_FOCAL_LENGTH_SET("camera_focal_length_set"),
 
+    CAMERA_SCREEN_DRAG("camera_screen_drag"),
+
     GIMBAL_RESET("gimbal_reset"),
 
     CAMERA_LOOK_AT("camera_look_at"),

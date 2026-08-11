@@ -14,6 +14,7 @@ import com.uav.great.mqtt.enums.device.DockModeCodeEnum;
 import com.uav.great.mqtt.enums.device.DroneModeCodeEnum;
 import com.uav.great.mqtt.enums.control.PayloadControlMethodEnum;
 import com.uav.great.mqtt.model.control.CameraLookAtRequest;
+import com.uav.great.mqtt.model.control.CameraScreenDragRequest;
 import com.uav.great.mqtt.model.control.FlyToPointRequest;
 import com.uav.great.mqtt.model.control.PayloadAuthorityGrabRequest;
 import com.uav.great.mqtt.model.control.TakeoffToPointRequest;
@@ -268,6 +269,10 @@ public class ControlServiceImpl implements IControlService {
         if (isRc(gateway) && PayloadControlMethodEnum.CAMERA_LOOK_AT == command) {
             response = abstractControlService.cameraLookAtRc(
                     gateway, mapper.convertValue(param.getData(), CameraLookAtRequest.class));
+        } else if (isRc(gateway) && PayloadControlMethodEnum.CAMERA_SCREEN_DRAG == command) {
+            // RC 网关下负载指令需 device_list 寻址无人机，否则指令被静默丢弃（211001）。
+            response = abstractControlService.cameraScreenDragRc(
+                    gateway, mapper.convertValue(param.getData(), CameraScreenDragRequest.class));
         } else {
             response = abstractControlService.payloadControl(
                     gateway, command, mapper.convertValue(param.getData(), command.getClazz()));

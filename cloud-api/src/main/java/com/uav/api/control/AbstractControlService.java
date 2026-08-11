@@ -231,6 +231,22 @@ public abstract class AbstractControlService {
                 request);
     }
 
+    public TopicServicesResponse<ServicesReplyData> cameraScreenDrag(GatewayManager gateway, CameraScreenDragRequest request) {
+        return servicesPublish.publish(
+                gateway.getGatewaySn(),
+                ControlMethodEnum.CAMERA_SCREEN_DRAG.getMethod(),
+                request);
+    }
+
+    // RC 网关需 device_list 寻址无人机（负载挂在机身上），否则指令被遥控器静默丢弃（211001）。
+    public TopicServicesResponse<ServicesReplyData> cameraScreenDragRc(GatewayManager gateway, CameraScreenDragRequest request) {
+        return servicesPublish.publish(
+                gateway.getGatewaySn(),
+                ControlMethodEnum.CAMERA_SCREEN_DRAG.getMethod(),
+                request,
+                List.of(Map.of("sn", gateway.getDroneSn())));
+    }
+
     @CloudSDKVersion(exclude = GatewayTypeEnum.RC)
     public TopicServicesResponse<ServicesReplyData> gimbalReset(GatewayManager gateway, GimbalResetRequest request) {
         return servicesPublish.publish(

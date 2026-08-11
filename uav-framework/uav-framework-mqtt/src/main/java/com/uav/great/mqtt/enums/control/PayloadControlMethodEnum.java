@@ -22,6 +22,8 @@ public enum PayloadControlMethodEnum {
 
     CAMERA_FOCAL_LENGTH_SET(ControlMethodEnum.CAMERA_FOCAL_LENGTH_SET, CameraFocalLengthSetRequest.class),
 
+    CAMERA_SCREEN_DRAG(ControlMethodEnum.CAMERA_SCREEN_DRAG, CameraScreenDragRequest.class),
+
     GIMBAL_RESET(ControlMethodEnum.GIMBAL_RESET, GimbalResetRequest.class),
 
     CAMERA_LOOK_AT(ControlMethodEnum.CAMERA_LOOK_AT, CameraLookAtRequest.class),

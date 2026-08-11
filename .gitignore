@@ -50,6 +50,9 @@ build/
 /src/test/
 *.zip
 
+# flatten-maven-plugin 生成物（CI 变量展开的 POM，非源码）
+.flattened-pom.xml
+
 # Python demo
 docs/python-demo/.venv/
 __pycache__/
