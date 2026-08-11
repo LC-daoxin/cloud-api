@@ -37,6 +37,9 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
+import com.uav.great.mqtt.enums.control.ControlSourceEnum;
+import com.uav.service.manage.model.dto.DevicePayloadReceiver;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
@@ -224,9 +227,24 @@ public class ControlServiceImpl implements IControlService {
         }
 
         ServicesReplyData serviceReply = response.getData();
-        return serviceReply.getResult().isSuccess() ?
-                HttpResultResponse.success()
-                : HttpResultResponse.error(serviceReply.getResult());
+        if (!serviceReply.getResult().isSuccess()) {
+            return HttpResultResponse.error(serviceReply.getResult());
+        }
+        // RC 기기는 payload_authority_grab 후 control_source 상태 메시지를 보내지 않아
+        // DB/Redis가 갱신되지 않는 문제 해결: grab 성공 시 직접 A로 업데이트한다.
+        if (DroneAuthorityEnum.PAYLOAD == authority) {
+            deviceRedisService.getDeviceOnline(sn).map(DeviceDTO::getChildDeviceSn)
+                    .flatMap(deviceRedisService::getDeviceOnline)
+                    .ifPresent(drone -> devicePayloadService.updatePayloadControl(drone,
+                            List.of(DevicePayloadReceiver.builder()
+                                    .payloadIndex(new PayloadIndex(param.getPayloadIndex()))
+                                    .controlSource(ControlSourceEnum.A)
+                                    .deviceSn(drone.getDeviceSn())
+                                    .sn(drone.getDeviceSn() + "-" +
+                                            new PayloadIndex(param.getPayloadIndex()).getPosition().getPosition())
+                                    .build())));
+        }
+        return HttpResultResponse.success();
     }
 
     private Boolean checkPayloadAuthority(String sn, String payloadIndex) {

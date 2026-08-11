@@ -7,7 +7,7 @@ camera_aim / camera_screen_drag 不在服务端已实现的指令列表中，已
 运行：
     python3 demo_06_gimbal_pitch.py
 """
-from config import DRONE_SN, PAYLOAD_INDEX
+from config import DOCK_SN, DRONE_SN, PAYLOAD_INDEX
 from demo_common import (
     DemoError,
     login,
@@ -22,7 +22,8 @@ RESET_MODES = {0: "回中", 1: "向下", 2: "偏航回中", 3: "向下45度"}
 
 def _payload_command(token, cmd: str, data: dict):
     try:
-        return send_payload_command(token, cmd, data, sn=DRONE_SN, timeout=10)
+        # payload 指令路径需用网关(遥控器) SN，不是无人机 SN
+        return send_payload_command(token, cmd, data, sn=DOCK_SN, timeout=10)
     except DemoError as exc:
         print_error_and_hint(exc)
         return None
@@ -50,12 +51,13 @@ def _print_result(label, result):
 
 if __name__ == "__main__":
     try:
-        require_config(YOOX_DRONE_SN=DRONE_SN, YOOX_PAYLOAD_INDEX=PAYLOAD_INDEX)
-        print(f"[*] 目标设备: {DRONE_SN}")
-        print(f"[*] 负载索引: {PAYLOAD_INDEX}\n")
+        require_config(YOOX_DOCK_SN=DOCK_SN, YOOX_DRONE_SN=DRONE_SN, YOOX_PAYLOAD_INDEX=PAYLOAD_INDEX)
+        print(f"[*] 网关(遥控器)SN: {DOCK_SN}")
+        print(f"[*] 无人机SN:       {DRONE_SN}")
+        print(f"[*] 负载索引:       {PAYLOAD_INDEX}\n")
 
         token = login()
-        seize_payload_authority(token, PAYLOAD_INDEX, sn=DRONE_SN)
+        seize_payload_authority(token, PAYLOAD_INDEX, sn=DOCK_SN)
     except DemoError as exc:
         print_error_and_hint(exc)
         raise SystemExit(1)
