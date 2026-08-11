@@ -328,6 +328,57 @@ gzip -f /tmp/cloud-api-thirdparty-arm64.tar
 scp /tmp/cloud-api-thirdparty-arm64.tar.gz jetson@172.20.10.3:/tmp/
 ```
 
+### 7.1 使用 U 盘离线部署包（推荐，一键安装）
+
+项目内置了**完整离线部署包** `offline/nano-deploy/`（镜像 + 配置 + 一键安装脚本，
+约 473 MB），适合 Nano 完全无网络、且无法 scp 的场景。
+
+**目录结构：**
+
+```text
+offline/nano-deploy/
+├── install.sh              # 一键安装脚本（Nano 上执行）
+├── .env.template           # 标准环境变量模板（4 节点统一密码）
+├── images/
+│   ├── cloud-api-nano1-<短号>.tar.gz         # 应用镜像（ARM64）
+│   └── cloud-api-thirdparty-arm64.tar.gz     # MySQL/Redis/Mosquitto/MinIO/MediaMTX
+└── deploy/                 # docker-compose.nano.yml + docker/ + sql/
+```
+
+> `offline/` 目录（含镜像 tar.gz 和带密码的模板）已在 `.gitignore` 中排除，不会进入 Git。
+> 镜像超过 GitHub 100 MB 单文件上限，只能离线分发。
+
+**Mac 侧：复制离线包到 U 盘**
+
+```bash
+# 插入 U 盘后确认挂载点
+ls /Volumes/
+
+# 复制整个离线部署目录到 U 盘
+cp -R offline/nano-deploy "/Volumes/<U盘卷标>/"
+```
+
+**Nano 侧：插入 U 盘并一键安装**
+
+```bash
+# 1. 查找 U 盘挂载点
+lsblk
+# 通常在 /media/jetson/<卷标>，若未自动挂载：
+sudo mkdir -p /mnt/usb && sudo mount /dev/sda1 /mnt/usb
+
+# 2. 进入离线包目录，执行一键安装（参数为本机局域网 IP）
+cd /media/jetson/<U盘卷标>/nano-deploy
+bash install.sh 172.20.10.4
+
+# 安装完成后卸载 U 盘
+cd / && sudo umount /media/jetson/<U盘卷标>
+```
+
+脚本自动完成：加载全部镜像 → 部署到 `~/cloud-api` → 生成 `.env`（自动填充
+`NODE_LAN_IP` 和应用镜像 tag）→ 启动服务 → 验证登录。全部成功后终端会打印
+HTTP / MQTT 地址和登录账号，即可接入真机。4 台 Nano 重复同样步骤，只需
+更换 `install.sh` 后面的 IP 参数。
+
 Nano 上加载：
 
 ```bash
@@ -970,7 +1021,35 @@ docker compose -f docker-compose.nano.yml --env-file .env up -d app
 docker compose -f docker-compose.nano.yml --env-file .env ps app
 ```
 
-### 17.3 查看 Docker 容器状态
+### 17.3 重新生成 U 盘离线部署包（Mac 侧）
+
+新版本发布后，刷新 `offline/nano-deploy/` 离线包，再复制到 U 盘分发给无网 Nano：
+
+```bash
+cd ~/git/yooxplore/Autel/Cloud-API
+
+# 1. 构建新版本应用镜像
+export CLOUD_API_VERSION="nano1-$(git rev-parse --short HEAD)"
+docker build --platform linux/arm64 -t "uav-cloud-api-app:${CLOUD_API_VERSION}" .
+
+# 2. 导出新版本应用镜像到离线包（删除旧版本，只保留一份）
+rm -f offline/nano-deploy/images/cloud-api-nano1-*.tar.gz
+docker save "uav-cloud-api-app:${CLOUD_API_VERSION}" | gzip \
+  > "offline/nano-deploy/images/cloud-api-${CLOUD_API_VERSION}.tar.gz"
+
+# 3. 同步部署配置文件（compose / application.yml / sql 等）
+cp docker-compose.nano.yml offline/nano-deploy/deploy/
+cp -r docker sql offline/nano-deploy/deploy/
+
+# 4. 复制到 U 盘（插入 U 盘后）
+cp -R offline/nano-deploy "/Volumes/<U盘卷标>/"
+```
+
+> 第三方基础镜像（MySQL/Redis/Mosquitto/MediaMTX/MinIO）版本不变时无需重新导出。
+> Nano 侧拿到新离线包后，直接重跑 `bash install.sh <本机IP>`；脚本检测到已有
+> `.env` 时只更新镜像和配置、不覆盖已有数据。
+
+### 17.4 查看 Docker 容器状态
 
 ```bash
 # 全部容器概览（含退出的）
@@ -990,7 +1069,7 @@ docker image ls --format '{{.Repository}}:{{.Tag}}  {{.Size}}  {{.CreatedSince}}
   | grep uav-cloud-api-app
 ```
 
-### 17.4 系统资源监控（Nano）
+### 17.5 系统资源监控（Nano）
 
 ```bash
 # 内存用量

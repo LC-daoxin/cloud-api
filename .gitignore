@@ -14,6 +14,9 @@ __pycache__/
 .env.*
 !.env.example
 
+# 离线部署包（镜像 tar.gz 超过 GitHub 100MB 单文件上限，且 .env.template 含密码）
+offline/
+
 ### STS ###
 .apt_generated
 .classpath
