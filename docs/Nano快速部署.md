@@ -56,7 +56,8 @@ Docker 的 `ports` 映射临时改写：
 | MinIO | TCP `9101` | MinIO Console |
 | MediaMTX | TCP `8554` | RTSP |
 | MediaMTX | TCP `8889` | WebRTC/WHEP HTTP |
-| MediaMTX | UDP `8189` | WebRTC 媒体 |
+| MediaMTX | UDP `8189` | WebRTC ICE 媒体（Nano 默认 UDP；Mac 本地开发改为 TCP） |
+| MediaMTX | TCP `8190` | WebRTC ICE TCP 回退（Nano 专用，UDP 被阻断时自动切换） |
 
 ### 2.1 与 YOOX_Cloud_GCS 部署在同一台 Nano
 
@@ -68,7 +69,7 @@ Cloud-API 和 YOOX_Cloud_GCS 的默认配置不能原样同时启动。至少存
 | `1883` | Mosquitto MQTT | EMQX MQTT |
 | `8554` | MediaMTX RTSP | MediaMTX RTSP |
 | `9001` | MQTT WebSocket | MinIO Console（绑定本机回环地址） |
-| `8189/udp` | MediaMTX WebRTC | YOOX MediaMTX RTP/WebRTC |
+| `8189/tcp+udp`、`8190/tcp` | MediaMTX WebRTC ICE | YOOX MediaMTX RTP/WebRTC |
 
 部署前先在 Nano 上检查：
 
@@ -929,3 +930,83 @@ sudo chown -R "$USER":"$(id -gn)" ~/1_projects/cloud-api
 - [API 调用指南](API_CALL_GUIDE.md)
 - [Docker save](https://docs.docker.com/reference/cli/docker/image/save/)
 - [Docker load](https://docs.docker.com/reference/cli/docker/image/load/)
+
+## 17. 日常运维快查
+
+### 17.1 构建并分发应用镜像（Mac 侧）
+
+```bash
+cd ~/git/yooxplore/Autel/Cloud-API && git pull --ff-only
+
+export CLOUD_API_VERSION="nano1-$(git rev-parse --short HEAD)"
+
+docker build --platform linux/arm64 -t "uav-cloud-api-app:${CLOUD_API_VERSION}" .
+
+# 导出压缩包（约 150 MB）
+docker save "uav-cloud-api-app:${CLOUD_API_VERSION}" | gzip \
+  > "/tmp/cloud-api-${CLOUD_API_VERSION}.tar.gz"
+
+# 传输到 Nano（或复制到 U 盘）
+scp "/tmp/cloud-api-${CLOUD_API_VERSION}.tar.gz" jetson@<Nano-IP>:/tmp/
+# cp "/tmp/cloud-api-${CLOUD_API_VERSION}.tar.gz" /Volumes/<U盘>/
+```
+
+### 17.2 Nano 侧：加载镜像并重启 app
+
+```bash
+cd ~/1_projects/cloud-api
+
+# 1. 加载镜像
+gunzip -c /tmp/cloud-api-nano1-<短号>.tar.gz | docker load
+
+# 2. 更新 APP_IMAGE（替换 .env 中的 tag）
+sed -i "s|^APP_IMAGE=.*|APP_IMAGE=uav-cloud-api-app:nano1-<短号>|" .env
+grep '^APP_IMAGE=' .env      # 确认修改
+
+# 3. 仅重启 app，不影响数据库 / MQTT 等其他服务
+docker compose -f docker-compose.nano.yml --env-file .env up -d app
+
+# 4. 等待 healthy
+docker compose -f docker-compose.nano.yml --env-file .env ps app
+```
+
+### 17.3 查看 Docker 容器状态
+
+```bash
+# 全部容器概览（含退出的）
+docker compose -f docker-compose.nano.yml --env-file .env ps -a
+
+# 实时 CPU / 内存 / 网络 / IO（Ctrl+C 退出）
+docker stats
+
+# app 服务最近日志（-f 持续追踪）
+docker compose -f docker-compose.nano.yml --env-file .env logs --tail=100 -f app
+
+# 容器健康状态
+docker inspect uav-cloud-app --format '{{.State.Health.Status}}'
+
+# 已加载的 Cloud-API 镜像列表
+docker image ls --format '{{.Repository}}:{{.Tag}}  {{.Size}}  {{.CreatedSince}}' \
+  | grep uav-cloud-api-app
+```
+
+### 17.4 系统资源监控（Nano）
+
+```bash
+# 内存用量
+free -h
+
+# 磁盘占用：系统 + Docker 各类资源（镜像 / 容器 / 卷）
+df -h /
+docker system df
+
+# Jetson 专属：实时 CPU / GPU / 内存 / 温度一体监控（Ctrl+C 退出）
+tegrastats
+
+# 温度快照（单位 °C）
+paste /sys/class/thermal/thermal_zone*/temp \
+  | awk '{for(i=1;i<=NF;i++) printf "zone%d: %.1f°C  ", i, $i/1000; print ""}'
+
+# 清理悬空镜像释放空间（不影响运行中容器）
+docker image prune -f
+```
