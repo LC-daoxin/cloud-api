@@ -169,7 +169,7 @@ POST /control/api/v1/devices/{sn}/jobs/return_home_cancel
 
 ## 5. 直播与 DRC
 
-`demo_11_livestream.py` 默认 `VIDEO_QUALITY=2`（标清），3 为高清。设备发布凭证由服务端配置，Demo 默认不传自定义 `url`，以便后端复用已有 MediaMTX publisher。开始直播返回成功不等于已有媒体帧；脚本使用不含发布凭据的 RTSP 播放路径做 `ffprobe` 探测，错误输出会脱敏。无论探测结果如何，脚本都不会在开始前自动停止现有 publisher；只有设备明确返回“直播已开始”、MediaMTX 又确认无媒体时，才会要求操作者输入 `YES` 后执行一次停止再开始。未安装 `ffprobe` 时状态是“无法探测”而不是“无流”。菜单 6 只对可安全切回的 `normal/wide/zoom/ir` 镜头执行临时切换恢复，`thermal` 等不支持类型会在任何镜头切换前终止。
+`demo_11_livestream.py` 默认 `VIDEO_QUALITY=2`（标清），3 为高清。**RTSP 直播时脚本会从 `.env` 读取发布凭据（`YOOX_RTSP_PUBLISH_USERNAME/PASSWORD`，默认均为 `admin`，对应服务端 `livestream.url.rtsp` 配置），拼接成完整推流地址 `rtsp://user:pass@host:port/{sn}-{payload}` 并随开始直播请求下发；服务端收到自定义 `url` 后会原样发给设备。EVO Max 系列必须收到这种含 host 与流路径的完整地址才会真正推流——若只下发旧格式 `userName=xx&password=xx&port=8554`，设备会虚假应答成功但 MediaMTX 收不到任何流（播放 404）。** 开始直播返回成功不等于已有媒体帧；脚本使用不含发布凭据的 RTSP 播放路径做 `ffprobe` 探测，错误输出会脱敏。无论探测结果如何，脚本都不会在开始前自动停止现有 publisher；只有设备明确返回“直播已开始”、MediaMTX 又确认无媒体时，才会要求操作者输入 `YES` 后执行一次停止再开始。未安装 `ffprobe` 时状态是“无法探测”而不是“无流”。菜单 6 只对可安全切回的 `zoom/ir` 镜头执行临时切换恢复，`wide/normal/thermal` 等会在任何镜头切换前终止并提示改用普通开始。
 
 DRC 必须使用 `/drc/connect` 返回的专用 Broker 凭证和 `/drc/enter` 返回的 pub/sub ACL，不能把 DRC 指令直接发到普通 MQTT 连接。`demo_12` 和 `demo_15` 会等待 MQTT `CONNACK` 与订阅 `SUBACK`，随后立即发送心跳和连续两帧全零 `drone_control` 探针（`seq=0→1`）。只有当前 DRC 会话、当前 `drc/up` Topic、短时窗内的两帧回包都带显式 `result=0` 且 `output.seq` 依次匹配时才解锁非零摇杆；若回包携带 `tid/bid`，还必须匹配对应请求 ID。重连会重新锁定并重新握手，迟到、乱序、缺少 `seq` 或结果不明的 ACK 均不会解锁。这同时规避了部分 RC 固件不回显 `heart_beat` 导致“第一次进入 DRC 无心跳/无法控制”的问题。
 脚本会订阅 ACL 中全部 `sub` Topic，其中选择与控制 `drc/down` 对应的 `drc/up`，并直接接收紧急/强制降落的 `services_reply`。
