@@ -20,6 +20,7 @@ RTSP 拉流地址格式（MediaMTX 动态路径）：
     python3 demo_11_livestream.py
 """
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -32,6 +33,8 @@ from config import (
     MQTT_USERNAME,
     RTSP_HOST,
     RTSP_PORT,
+    RTSP_PUBLISH_PASSWORD,
+    RTSP_PUBLISH_USERNAME,
 )
 from demo_common import DemoApiError, DemoError, api_call, login, print_error_and_hint
 
@@ -108,6 +111,22 @@ def build_rtsp_playback_url(video_id: str) -> str:
     return f"rtsp://{RTSP_HOST}:{RTSP_PORT}/{drone_sn}-{payload_index}"
 
 
+def build_rtsp_push_url(video_id: str) -> str:
+    """带凭据的完整推流地址，供服务端原样下发给设备。
+
+    EVO Max 必须收到完整的 RTSP 推流地址（含 host 与流路径）才会真正
+    开始推流；服务端默认的 userName=xx&password=xx&port=xx 旧格式只能
+    被部分机型识别，会导致设备应答成功但 MediaMTX 收不到任何流（404）。
+    """
+    parts = video_id.split("/")
+    drone_sn = parts[0] if len(parts) > 0 else "unknown"
+    payload_index = parts[1] if len(parts) > 1 else "0-0-0"
+    return (
+        f"rtsp://{RTSP_PUBLISH_USERNAME}:{RTSP_PUBLISH_PASSWORD}"
+        f"@{RTSP_HOST}:{RTSP_PORT}/{drone_sn}-{payload_index}"
+    )
+
+
 def parse_video_type(video_id: str) -> str:
     """从 video_id（如 drone_sn/payload_index/zoom-0）中解析出当前镜头类型。"""
     parts = video_id.split("/")
@@ -170,8 +189,11 @@ def live_start(token, video_id: str, url_type: int = 2, video_quality: int = VID
     }
     if video_type in ("zoom", "ir"):
         body["video_type"] = video_type
-    # 默认不传自定义 url：由服务端使用已配置的发布凭证，并允许
-    # LiveStreamServiceImpl 先检查 MediaMTX publisher 后复用，避免重启已有直播。
+    if url_type == 2:
+        # EVO Max 实测：必须下发完整推流地址（含 host 与流路径）才会真正推流。
+        # 不传 url 时服务端只下发 userName/password/port 旧参数，
+        # 设备应答成功但 MediaMTX 收不到任何流（播放 404 的根因）。
+        body["url"] = build_rtsp_push_url(video_id)
     # 服务端等待设备 MQTT 应答最坏情况可达 3次×20秒=60秒（见 AbstractLivestreamService.DEFAULT_TIMEOUT ＋
     # MqttGatewayPublish.DEFAULT_RETRY_COUNT），这里要盖过那个时长，否则会先于服务端报出 ReadTimeout
     result = api_call(

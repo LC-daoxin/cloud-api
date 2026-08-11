@@ -57,6 +57,12 @@ MQTT_PASSWORD = os.getenv("YOOX_MQTT_PASSWORD", "")
 RTSP_HOST = os.getenv("YOOX_RTSP_HOST", SERVER_IP).strip()
 RTSP_PORT = _env_int("YOOX_RTSP_PORT", 8554)
 
+# 设备推流发布凭据（对应 MedaiMTX 默认用户名密码，
+# 与服务端 application.yml 的 livestream.url.rtsp.username/password 一致）。
+# EVO Max 必须收到完整推流地址（含 host 与路径）才会真正推流。
+RTSP_PUBLISH_USERNAME = os.getenv("YOOX_RTSP_PUBLISH_USERNAME", "admin").strip()
+RTSP_PUBLISH_PASSWORD = os.getenv("YOOX_RTSP_PUBLISH_PASSWORD", "admin")
+
 # WebSocket 地址可单独覆盖（反向代理/TLS 场景常用 wss://）。
 WS_URL = os.getenv(
     "YOOX_WS_URL", f"ws://{SERVER_IP}:{SERVER_PORT}/api/v1/ws"
