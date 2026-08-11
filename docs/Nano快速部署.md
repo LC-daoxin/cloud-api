@@ -263,13 +263,8 @@ openssl rand -base64 32
 - 当前 Compose 中 Redis 没有启用密码，不能只在 `.env` 中填写 `REDIS_PASSWORD`；否则应用会尝试
   对无密码 Redis 执行认证，导致连接失败。
 - Mosquitto 当前允许匿名连接；登录接口返回的 MQTT 用户名和密码不是 Broker 的强制认证规则。
-- `.env.nano1` 包含敏感信息，不要提交到 Git。
-
-检查环境文件是否被忽略：
-
-```bash
-git check-ignore .env.nano1
-```
+- 内部项目允许 `.env` / `.env.nano1` 入库（便于 Nano `git pull` 后直接部署）；但仓库为 public，
+  其中的 DB/JWT/MinIO 密码会随仓库公开，请管理好仓库访问权限。
 
 确认 Compose 能解析配置：
 
@@ -454,18 +449,25 @@ docker image ls \
   | grep uav-cloud-api-app
 ```
 
-### 8.3 安装环境文件
+### 8.3 准备环境文件
+
+`.env` / `.env.nano1` 已随仓库入库，克隆后仓库里直接就有。Nano 上部署用的文件是仓库根目录的
+`.env`（配合 `docker-compose.nano.yml`）。确认关键字段：
 
 ```bash
-cp -p /tmp/.env.cloud-api /home/jetson/1_projects/cloud-api/.env
-chmod 600 /home/jetson/1_projects/cloud-api/.env
-
 cd /home/jetson/1_projects/cloud-api
-git check-ignore .env
-grep -E '^(COMPOSE_PROJECT_NAME|NODE_LAN_IP|APP_IMAGE)=' .env
+grep -E '^(NODE_LAN_IP|APP_IMAGE)=' .env
 ```
 
-`git check-ignore .env` 必须输出 `.env`。如果没有输出，先修复忽略规则再继续。
+如 `NODE_LAN_IP` 与本机实际 IP 不符（例如克隆下来的是别的节点的配置），用 sed 修正：
+
+```bash
+sed -i "s|^NODE_LAN_IP=.*|NODE_LAN_IP=$(hostname -I | awk '{print $1}')|" .env
+grep '^NODE_LAN_IP=' .env
+```
+
+> 若使用离线 U 盘部署包，则从 `offline/nano-deploy/.env.template` 生成 `.env`
+>（install.sh 会自动完成），同样只需确认 `NODE_LAN_IP`。
 
 ## 9. Nano 上预检和启动
 
@@ -956,7 +958,7 @@ sudo chown -R "$USER":"$(id -gn)" ~/1_projects/cloud-api
 
 如果目录不是 Git 仓库，先检查并备份其中内容，再决定是否改名；不要直接递归删除。
 
-## 15. 完成标准
+## 15. 完成存在且权限为 `600`（已入库，`git pull` 可直接获取）
 
 满足以下条件后才算部署完成：
 

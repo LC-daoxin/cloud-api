@@ -9,12 +9,11 @@ target/
 __pycache__/
 *.pyc
 
-# 环境变量（含节点密码/密钥，不入库；保留 .env.example 作为模板）
-.env
-.env.*
-!.env.example
+# 环境变量：应内部项目要求允许 .env / .env.nano1 入库，便于 Nano git pull 后直接部署。
+# 安全提示：仓库已 public，明文密码（DB/JWT/MinIO）随仓库公开，请妥善管理仓库访问权限。
+# 仅保留 .env.example 之外的本地副本不入库的惯例已取消。
 
-# 离线部署包（镜像 tar.gz 超过 GitHub 100MB 单文件上限，且 .env.template 含密码）
+# 离线部署包（镜像 tar.gz 超过 GitHub 100MB 单文件上限，仅离线分发）
 offline/
 
 ### STS ###
