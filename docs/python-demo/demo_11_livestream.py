@@ -112,8 +112,10 @@ def parse_video_type(video_id: str) -> str:
     """从 video_id（如 drone_sn/payload_index/zoom-0）中解析出当前镜头类型。"""
     parts = video_id.split("/")
     if len(parts) < 3:
-        return "normal"
-    return parts[2].split("-")[0] or "normal"
+        return "zoom"
+    lens = parts[2].split("-")[0] or "zoom"
+    # "normal" 是 EVO Max 占位值，实际主摄为 zoom；未知类型统一回退到 zoom
+    return lens if lens in {"zoom", "ir", "wide"} else "zoom"
 
 
 def resolve_alternate_lens(desired_lens: str) -> str:
@@ -186,6 +188,11 @@ def live_start(token, video_id: str, url_type: int = 2, video_quality: int = VID
         response_url = live_data.get("url") if isinstance(live_data, dict) else None
         playback_url = build_rtsp_playback_url(video_id)
         print(f"    RTSP 路径（凭证已隐藏）: {playback_url}")
+        print(
+            "    低延迟播放(UDP): ffplay -rtsp_transport udp -fflags nobuffer+discardcorrupt "
+            "-flags low_delay -avioflags direct -probesize 32 -sync ext -framedrop -vf setpts=0 "
+            f'"{playback_url}"'
+        )
         if isinstance(response_url, str) and response_url and not response_url.startswith("rtsp://"):
             print(f"    服务端播放端点: {response_url}")
         print("    播放地址不包含设备发布凭据；不要把服务端发布密码写入日志或命令历史。")
@@ -282,10 +289,11 @@ def live_start_recover_by_lens_switch(token, video_id: str) -> str | None:
     若切回目标镜头失败，会补发一次纠正指令，避免设备停留在临时镜头上。"""
     rtsp_url = build_rtsp_playback_url(video_id)
     desired_lens = parse_video_type(video_id)
-    if desired_lens not in {"normal", "wide", "zoom", "ir"}:
+    if desired_lens not in {"zoom", "ir"}:
+        # wide 等其他镜头不支持 LensChangeVideoTypeEnum 切换
         print(
-            f"[✗] 镜头 {desired_lens} 不支持安全的切换恢复；"
-            "不会先切到备用镜头，请改用普通开始并检查该负载能力"
+            f"[✗] 镜头 {desired_lens} 不支持切换恢复（仅 zoom↔ir 有效）；"
+            "请直接使用选项 1 普通开始直播"
         )
         return None
     alternate_lens = resolve_alternate_lens(desired_lens)
