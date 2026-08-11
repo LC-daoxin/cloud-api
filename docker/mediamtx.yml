@@ -6,8 +6,10 @@ logDestinations: [stdout]
 
 rtsp: true
 rtspAddress: :8554
-# RTSP 强制 TCP 传输
-rtspTransports: [tcp]
+# RTSP 传输：Nano 为 host 网络，UDP 可用。必须允许 udp——
+# 设备推流端与低延迟播放（-rtsp_transport udp）用 UDP 请求时，
+# 若此处只有 tcp 会被服务端拒绝（461 Unsupported Transport）。
+rtspTransports: [udp, tcp]
 
 # HLS 默认 :8888 与 Nano 上的 Jupyter Lab 冲突，改用 8881
 hlsAddress: :8881
