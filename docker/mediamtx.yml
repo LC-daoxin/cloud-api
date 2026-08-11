@@ -1,26 +1,20 @@
+# Nano（host 网络）默认配置，由 docker-compose.nano.yml 挂载。
+# Mac Docker Desktop 请使用 mediamtx.mac.yml（桥接网络不转发 UDP）。
+
 logLevel: info
 logDestinations: [stdout]
 
 rtsp: true
 rtspAddress: :8554
-# RTSP 强制 TCP 传输；Docker Compose 只暴露 8554/tcp，不暴露 UDP 端口
+# RTSP 强制 TCP 传输
 rtspTransports: [tcp]
 
 webrtc: true
 webrtcAddress: :8889
-# WebRTC ICE 传输模式由 docker-compose environment 注入，支持两种场景：
-#
-#   Mac Docker Desktop（桥接网络，docker-compose.yml）：
-#     Docker Desktop 不转发容器 UDP → 必须走 TCP ICE
-#     MTX_WEBRTC_ICE_UDP_MUX_ADDRESS=         （空 = 禁用 UDP ICE mux）
-#     MTX_WEBRTC_ICE_TCP_MUX_ADDRESS=:8189    （强制 TCP ICE，配合 8189/tcp 端口映射）
-#
-#   Jetson Nano（host 网络，docker-compose.nano.yml）：
-#     host 网络 UDP 直接可用，固定端口避免防火墙阻断随机端口
-#     MTX_WEBRTC_ICE_UDP_MUX_ADDRESS=:8189    （UDP ICE mux，首选，性能更好）
-#     MTX_WEBRTC_ICE_TCP_MUX_ADDRESS=:8190    （TCP ICE mux，回退，UDP 不通时自动切换）
-webrtcICEUDPMuxAddress: ${MTX_WEBRTC_ICE_UDP_MUX_ADDRESS}
-webrtcICETCPMuxAddress: ${MTX_WEBRTC_ICE_TCP_MUX_ADDRESS}
+# WebRTC ICE 媒体端口 mux：固定端口避免防火墙阻断随机动态端口。
+# UDP 首选（:8189），TCP 回退（:8190，UDP 被阻断时 ICE 自动切换）。
+webrtcICEUDPMuxAddress: :8189
+webrtcICETCPMuxAddress: :8190
 
 pathDefaults:
   source: publisher

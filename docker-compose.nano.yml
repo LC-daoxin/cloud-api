@@ -25,10 +25,7 @@ services:
     container_name: uav-mediamtx
     restart: unless-stopped
     network_mode: host
-    environment:
-      # host 网络 UDP 直接可用；固定 ICE mux 端口，避免防火墙阻断随机动态端口
-      - MTX_WEBRTC_ICE_UDP_MUX_ADDRESS=:8189    # UDP ICE mux（首选）
-      - MTX_WEBRTC_ICE_TCP_MUX_ADDRESS=:8190    # TCP ICE mux 回退（UDP 不通时自动切换）
+    # host 网络 UDP 直接可用；默认配置即 UDP ICE (:8189) 首选 + TCP (:8190) 回退
     volumes:
       - ./docker/mediamtx.yml:/mediamtx.yml:ro
 

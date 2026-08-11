@@ -5,12 +5,9 @@ services:
     image: bluenviron/mediamtx:1.19.3
     container_name: uav-mediamtx
     restart: unless-stopped
-    environment:
-      # Mac Docker Desktop 桥接网络不转发容器 UDP，WebRTC ICE 必须强制走 TCP
-      - MTX_WEBRTC_ICE_UDP_MUX_ADDRESS=
-      - MTX_WEBRTC_ICE_TCP_MUX_ADDRESS=:8189
     volumes:
-      - ./docker/mediamtx.yml:/mediamtx.yml:ro
+      # Mac Docker Desktop 桥接网络不转发 UDP，使用 Mac 专用配置强制 TCP ICE
+      - ./docker/mediamtx.mac.yml:/mediamtx.yml:ro
     ports:
       - "8554:8554"        # RTSP
       - "8889:8889"        # WebRTC HTTP/WHEP

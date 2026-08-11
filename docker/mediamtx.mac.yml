@@ -1,0 +1,23 @@
+# Mac Docker Desktop（桥接网络）专用配置，由 docker-compose.yml 挂载。
+# Docker Desktop 不转发容器 UDP 端口，WebRTC ICE 必须走 TCP。
+# Nano（host 网络）请使用默认的 mediamtx.yml。
+
+logLevel: info
+logDestinations: [stdout]
+
+rtsp: true
+rtspAddress: :8554
+# RTSP 强制 TCP 传输；桥接网络下 UDP 不可达
+rtspTransports: [tcp]
+
+webrtc: true
+webrtcAddress: :8889
+# 桥接网络下随机 UDP 端口对外不可达，只启用 TCP ICE mux（:8189，
+# 依赖 docker-compose.yml 的 8189:8189/tcp 端口映射）
+webrtcICETCPMuxAddress: :8189
+
+pathDefaults:
+  source: publisher
+
+paths:
+  all_others:
