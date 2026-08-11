@@ -347,7 +347,8 @@ public abstract class AbstractControlService {
     public TopicServicesResponse<ServicesReplyData> payloadControl(GatewayManager gateway, PayloadControlMethodEnum methodEnum, BaseModel request) {
         try {
             AbstractControlService abstractControlService = SpringBeanUtils.getBean(this.getClass());
-            Method method = abstractControlService.getClass().getDeclaredMethod(
+            // getDeclaredMethod 仅查当前类，不含父类；改用 getMethod 向上遍历继承链
+            Method method = abstractControlService.getClass().getMethod(
                     Common.convertSnake(methodEnum.getPayloadMethod().getMethod()), GatewayManager.class, methodEnum.getClazz());
             return (TopicServicesResponse<ServicesReplyData>) method.invoke(abstractControlService, gateway, request);
         } catch (NoSuchMethodException | IllegalAccessException e) {
