@@ -9,6 +9,9 @@ rtspAddress: :8554
 # RTSP 强制 TCP 传输
 rtspTransports: [tcp]
 
+# HLS 默认 :8888 与 Nano 上的 Jupyter Lab 冲突，改用 8881
+hlsAddress: :8881
+
 webrtc: true
 webrtcAddress: :8889
 # WebRTC ICE 媒体端口 mux：固定端口避免防火墙阻断随机动态端口。
